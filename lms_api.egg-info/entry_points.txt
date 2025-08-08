@@ -1,0 +1,2 @@
+[paste.app_factory]
+main = lms_api:main

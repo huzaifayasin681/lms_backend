@@ -1,0 +1,17 @@
+pyramid
+pyramid-jinja2
+pyramid-debugtoolbar
+SQLAlchemy
+alembic
+psycopg2-binary
+PyJWT
+bcrypt
+requests
+marshmallow
+waitress
+python-dotenv
+
+[testing]
+pytest
+pytest-cov
+webtest
