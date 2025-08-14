@@ -8,6 +8,7 @@ from ..models.content import CourseContent
 from ..auth import require_auth
 from ..services.file_service import FileService
 from ..services.lms_integration import LMSIntegrationService
+from ..exceptions import ErrorHandler, handle_errors, DatabaseTransaction, ValidationError, FileError, ResourceNotFoundError, ContentError
 import logging
 import json
 import os
@@ -23,6 +24,7 @@ file_service = FileService()
 
 @view_config(route_name='course_content', request_method='GET', renderer='json')
 @require_auth
+@handle_errors
 def get_course_content(request):
     """Get all content for a course"""
     course_id = request.matchdict['course_id']
@@ -30,7 +32,7 @@ def get_course_content(request):
     # Check if course exists
     course = DBSession.query(Course).filter_by(course_id=course_id).first()
     if not course:
-        raise HTTPNotFound('Course not found')
+        raise ResourceNotFoundError('Course not found', resource_type='course', resource_id=course_id)
     
     query = DBSession.query(CourseContent).filter_by(course_id=course_id, active=True)
     
@@ -38,6 +40,27 @@ def get_course_content(request):
     content_type = request.params.get('type')
     if content_type:
         query = query.filter(CourseContent.content_type == content_type)
+    
+    # Search functionality
+    search_query = request.params.get('search', '').strip()
+    if search_query:
+        # Search in title, file_name, and content_data
+        search_filter = or_(
+            CourseContent.title.ilike(f'%{search_query}%'),
+            CourseContent.file_name.ilike(f'%{search_query}%'),
+            CourseContent.content_data.ilike(f'%{search_query}%')
+        )
+        query = query.filter(search_filter)
+    
+    # Visibility filtering (respect access control)
+    visibility_filter = request.params.get('visibility')
+    if visibility_filter:
+        query = query.filter(CourseContent.visibility == visibility_filter)
+    
+    # Access level filtering
+    access_level = request.params.get('access_level')
+    if access_level:
+        query = query.filter(CourseContent.access_level == access_level)
     
     # Sorting
     sort_by = request.params.get('sort', 'upload_date')
@@ -72,6 +95,7 @@ def get_course_content(request):
 
 @view_config(route_name='upload_content', request_method='POST', renderer='json')
 @require_auth
+@handle_errors
 def upload_content(request):
     """Upload content to a course"""
     course_id = request.matchdict['course_id']
@@ -79,33 +103,30 @@ def upload_content(request):
     # Check if course exists
     course = DBSession.query(Course).filter_by(course_id=course_id).first()
     if not course:
-        raise HTTPNotFound('Course not found')
+        raise ResourceNotFoundError('Course not found', resource_type='course', resource_id=course_id)
     
-    try:
+    with DatabaseTransaction(DBSession):
         # Handle different content types
         content_type = request.params.get('content_type', 'file')
         title = request.params.get('title', '')
+        visibility = request.params.get('visibility', 'private')
+        access_level = request.params.get('access_level', 'course_members')
         
         if content_type == 'file':
-            return _handle_file_upload(request, course_id, title)
+            return _handle_file_upload(request, course_id, title, visibility, access_level)
         elif content_type == 'url':
-            return _handle_url_upload(request, course_id, title)
+            return _handle_url_upload(request, course_id, title, visibility, access_level)
         elif content_type == 'text':
-            return _handle_text_upload(request, course_id, title)
+            return _handle_text_upload(request, course_id, title, visibility, access_level)
         else:
-            raise HTTPBadRequest('Invalid content type')
-            
-    except Exception as e:
-        DBSession.rollback()
-        log.error(f"Error uploading content: {str(e)}")
-        raise HTTPBadRequest(f'Upload failed: {str(e)}')
+            raise ValidationError('Invalid content type', field='content_type', value=content_type)
 
 
-def _handle_file_upload(request, course_id, title):
+def _handle_file_upload(request, course_id, title, visibility='private', access_level='course_members'):
     """Handle file upload"""
     # Get uploaded file
     if 'file' not in request.POST:
-        raise HTTPBadRequest('No file provided')
+        raise ValidationError('No file provided', field='file')
     
     file_field = request.POST['file']
     
@@ -114,18 +135,22 @@ def _handle_file_upload(request, course_id, title):
         file_data = file_field.file.read()
         filename = getattr(file_field, 'filename', 'unknown')
     else:
-        raise HTTPBadRequest('Invalid file format')
+        raise ValidationError('Invalid file format', field='file')
     
     # Validate file
     file_size = len(file_data)
-    is_valid, error_msg = file_service.validate_file(filename, file_size)
-    if not is_valid:
-        raise HTTPBadRequest(error_msg)
+    try:
+        file_service.validate_file(filename, file_size)
+    except (ValidationError, FileError) as e:
+        raise e  # Re-raise validation/file errors as-is
     
     # Save file
-    success, result, file_info = file_service.save_file(file_data, filename, course_id)
-    if not success:
-        raise HTTPBadRequest(result)
+    try:
+        success, result, file_info = file_service.save_file(file_data, filename, course_id)
+        if not success:
+            raise FileError(result, operation='save_file', file_path=filename)
+    except FileError as e:
+        raise e  # Re-raise FileError as-is
     
     # Create content record
     content_data = CourseContent.from_dict({
@@ -135,18 +160,41 @@ def _handle_file_upload(request, course_id, title):
         'file_path': file_info['file_path'],
         'file_name': file_info['file_name'],
         'file_size': file_info['file_size'],
-        'mime_type': file_info['mime_type']
+        'mime_type': file_info['mime_type'],
+        'visibility': visibility,
+        'access_level': access_level
     }, request.user.id)
     
     DBSession.add(content_data)
     DBSession.commit()
+    
+    # Try to upload to external LMS if course is from external LMS
+    course = DBSession.query(Course).filter_by(course_id=course_id).first()
+    if course and course.lms != 'local' and course.external_id:
+        try:
+            from ..services.lms_integration import LMSIntegrationService
+            integration_service = LMSIntegrationService()
+            
+            if course.lms == 'moodle':
+                external_id = integration_service.upload_to_moodle(content_data, file_info['file_path'])
+            elif course.lms == 'canvas':
+                external_id = integration_service.upload_to_canvas(content_data, file_info['file_path'])
+            
+            if external_id:
+                content_data.lms_resource_id = str(external_id)
+                DBSession.commit()
+                log.info(f"File also uploaded to external LMS ({course.lms}) with ID: {external_id}")
+                
+        except Exception as ext_error:
+            log.warning(f"Failed to upload file to external LMS ({course.lms}): {str(ext_error)}")
+            # Continue with local upload even if external upload fails
     
     log.info(f"File uploaded successfully: {filename} to course {course_id} by user {request.user.username}")
     
     return content_data.to_dict()
 
 
-def _handle_url_upload(request, course_id, title):
+def _handle_url_upload(request, course_id, title, visibility='private', access_level='course_members'):
     """Handle URL upload"""
     url = request.params.get('url', '').strip()
     description = request.params.get('description', '')
@@ -161,18 +209,41 @@ def _handle_url_upload(request, course_id, title):
         'course_id': course_id,
         'title': title or f'Link: {url[:50]}...' if len(url) > 50 else f'Link: {url}',
         'content_type': 'url',
-        'content_data': {'url': url, 'description': description}
+        'content_data': {'url': url, 'description': description},
+        'visibility': visibility,
+        'access_level': access_level
     }, request.user.id)
     
     DBSession.add(content_data)
     DBSession.commit()
+    
+    # Try to upload to external LMS if course is from external LMS
+    course = DBSession.query(Course).filter_by(course_id=course_id).first()
+    if course and course.lms != 'local' and course.external_id:
+        try:
+            from ..services.lms_integration import LMSIntegrationService
+            integration_service = LMSIntegrationService()
+            
+            if course.lms == 'moodle':
+                external_id = integration_service.upload_to_moodle(content_data)
+            elif course.lms == 'canvas':
+                external_id = integration_service.upload_to_canvas(content_data)
+            
+            if external_id:
+                content_data.lms_resource_id = str(external_id)
+                DBSession.commit()
+                log.info(f"URL also uploaded to external LMS ({course.lms}) with ID: {external_id}")
+                
+        except Exception as ext_error:
+            log.warning(f"Failed to upload URL to external LMS ({course.lms}): {str(ext_error)}")
+            # Continue with local upload even if external upload fails
     
     log.info(f"URL uploaded successfully: {url} to course {course_id} by user {request.user.username}")
     
     return content_data.to_dict()
 
 
-def _handle_text_upload(request, course_id, title):
+def _handle_text_upload(request, course_id, title, visibility='private', access_level='course_members'):
     """Handle text content upload"""
     text_content = request.params.get('text_content', '').strip()
     
@@ -186,11 +257,34 @@ def _handle_text_upload(request, course_id, title):
         'course_id': course_id,
         'title': title or f'Text: {text_content[:50]}...' if len(text_content) > 50 else 'Text Content',
         'content_type': 'text',
-        'content_data': {'text': text_content}
+        'content_data': {'text': text_content},
+        'visibility': visibility,
+        'access_level': access_level
     }, request.user.id)
     
     DBSession.add(content_data)
     DBSession.commit()
+    
+    # Try to upload to external LMS if course is from external LMS
+    course = DBSession.query(Course).filter_by(course_id=course_id).first()
+    if course and course.lms != 'local' and course.external_id:
+        try:
+            from ..services.lms_integration import LMSIntegrationService
+            integration_service = LMSIntegrationService()
+            
+            if course.lms == 'moodle':
+                external_id = integration_service.upload_to_moodle(content_data)
+            elif course.lms == 'canvas':
+                external_id = integration_service.upload_to_canvas(content_data)
+            
+            if external_id:
+                content_data.lms_resource_id = str(external_id)
+                DBSession.commit()
+                log.info(f"Text content also uploaded to external LMS ({course.lms}) with ID: {external_id}")
+                
+        except Exception as ext_error:
+            log.warning(f"Failed to upload text content to external LMS ({course.lms}): {str(ext_error)}")
+            # Continue with local upload even if external upload fails
     
     log.info(f"Text content uploaded successfully to course {course_id} by user {request.user.username}")
     
@@ -382,3 +476,115 @@ def serve_content_file(request):
         log.error(f"Error serving file {file_path}: {str(e)}")
         log.exception("Full exception details:")
         raise HTTPNotFound('Error serving file')
+
+
+@view_config(route_name='search_content', request_method='GET', renderer='json')
+@require_auth
+def search_content(request):
+    """Search content across all courses"""
+    search_query = request.params.get('q', '').strip()
+    if not search_query:
+        raise HTTPBadRequest('Search query is required')
+    
+    content_type = request.params.get('type')
+    course_filter = request.params.get('course_id')
+    visibility_filter = request.params.get('visibility')
+    access_level_filter = request.params.get('access_level')
+    
+    # Pagination
+    try:
+        page = int(request.params.get('page', 1))
+        limit = min(int(request.params.get('limit', 20)), 100)  # Max 100 results per page
+    except ValueError:
+        page, limit = 1, 20
+    
+    offset = (page - 1) * limit
+    
+    # Base query - only active content
+    query = DBSession.query(CourseContent).filter(CourseContent.active == True)
+    
+    # Search in title, file_name, and content_data
+    search_filter = or_(
+        CourseContent.title.ilike(f'%{search_query}%'),
+        CourseContent.file_name.ilike(f'%{search_query}%'),
+        CourseContent.content_data.ilike(f'%{search_query}%')
+    )
+    query = query.filter(search_filter)
+    
+    # Apply filters
+    if content_type:
+        query = query.filter(CourseContent.content_type == content_type)
+    
+    if course_filter:
+        query = query.filter(CourseContent.course_id == course_filter)
+    
+    if visibility_filter:
+        query = query.filter(CourseContent.visibility == visibility_filter)
+    
+    if access_level_filter:
+        query = query.filter(CourseContent.access_level == access_level_filter)
+    
+    # Access control - only show content user has access to
+    # For now, show all content user has course access to
+    # This could be enhanced with more granular permissions
+    
+    # Get total count for pagination
+    total_count = query.count()
+    
+    # Apply sorting and pagination
+    sort_by = request.params.get('sort', 'upload_date')
+    if sort_by == 'title':
+        query = query.order_by(CourseContent.title)
+    elif sort_by == 'size':
+        query = query.order_by(CourseContent.file_size.desc())
+    elif sort_by == 'relevance':
+        # Simple relevance scoring - prioritize title matches
+        query = query.order_by(
+            CourseContent.title.ilike(f'%{search_query}%').desc(),
+            CourseContent.upload_date.desc()
+        )
+    else:  # default: upload_date
+        query = query.order_by(CourseContent.upload_date.desc())
+    
+    # Apply pagination
+    content_items = query.offset(offset).limit(limit).all()
+    
+    # Prepare results with course information
+    results = []
+    for item in content_items:
+        item_dict = item.to_dict()
+        
+        # Add course information
+        course = DBSession.query(Course).filter_by(course_id=item.course_id).first()
+        if course:
+            item_dict['course_name'] = course.name
+            item_dict['course_lms'] = course.lms
+        
+        results.append(item_dict)
+    
+    # Calculate pagination info
+    total_pages = (total_count + limit - 1) // limit
+    has_next = page < total_pages
+    has_prev = page > 1
+    
+    return {
+        'content': results,
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total_count,
+            'pages': total_pages,
+            'has_next': has_next,
+            'has_prev': has_prev
+        },
+        'search': {
+            'query': search_query,
+            'filters': {
+                'type': content_type,
+                'course_id': course_filter,
+                'visibility': visibility_filter,
+                'access_level': access_level_filter
+            },
+            'sort': sort_by
+        }
+    }

@@ -4,6 +4,7 @@ import mimetypes
 from typing import Tuple, Optional, Dict, Any
 import logging
 from werkzeug.utils import secure_filename
+from ..exceptions import FileError, ValidationError
 
 log = logging.getLogger(__name__)
 
@@ -82,31 +83,50 @@ class FileService:
             
         Returns:
             Tuple of (is_valid, error_message)
+            
+        Raises:
+            ValidationError: If validation fails with detailed error info
         """
-        # Check file size
-        if file_size > self.MAX_FILE_SIZE:
-            return False, f"File size exceeds maximum limit of {self.MAX_FILE_SIZE / (1024*1024):.0f}MB"
-        
-        if file_size <= 0:
-            return False, "File is empty"
-        
-        # Check filename
-        if not filename or filename.strip() == '':
-            return False, "Filename is required"
-        
-        # Get file extension
-        file_ext = os.path.splitext(filename)[1][1:].lower()
-        
-        # Check extension
-        if file_ext not in self.ALLOWED_EXTENSIONS:
-            return False, f"File type '{file_ext}' is not allowed. Allowed types: {', '.join(self.ALLOWED_EXTENSIONS)}"
-        
-        # Check MIME type if provided
-        if mime_type and mime_type not in self.ALLOWED_MIME_TYPES:
-            # Sometimes browsers send different MIME types, so we'll log a warning but allow it
-            log.warning(f"Unexpected MIME type '{mime_type}' for file '{filename}'. Allowed based on extension.")
-        
-        return True, ""
+        try:
+            # Check file size
+            if file_size > self.MAX_FILE_SIZE:
+                raise ValidationError(
+                    f"File size exceeds maximum limit of {self.MAX_FILE_SIZE / (1024*1024):.0f}MB",
+                    field="file_size",
+                    value=file_size
+                )
+            
+            if file_size <= 0:
+                raise ValidationError("File is empty", field="file_size", value=file_size)
+            
+            # Check filename
+            if not filename or filename.strip() == '':
+                raise ValidationError("Filename is required", field="filename")
+            
+            # Get file extension
+            file_ext = os.path.splitext(filename)[1][1:].lower()
+            
+            # Check extension
+            if file_ext not in self.ALLOWED_EXTENSIONS:
+                raise ValidationError(
+                    f"File type '{file_ext}' is not allowed. Allowed types: {', '.join(self.ALLOWED_EXTENSIONS)}",
+                    field="file_extension",
+                    value=file_ext
+                )
+            
+            # Check MIME type if provided
+            if mime_type and mime_type not in self.ALLOWED_MIME_TYPES:
+                # Sometimes browsers send different MIME types, so we'll log a warning but allow it
+                log.warning(f"Unexpected MIME type '{mime_type}' for file '{filename}'. Allowed based on extension.")
+            
+            return True, ""
+            
+        except ValidationError:
+            # Re-raise ValidationError as-is
+            raise
+        except Exception as e:
+            log.error(f"Unexpected error during file validation: {str(e)}")
+            raise FileError(f"File validation failed: {str(e)}", operation="validation")
     
     def generate_unique_filename(self, original_filename: str) -> str:
         """Generate a unique filename to prevent conflicts"""
@@ -133,13 +153,29 @@ class FileService:
             
         Returns:
             Tuple of (success, error_message_or_path, file_info)
+            
+        Raises:
+            FileError: If file operation fails
         """
         try:
             # Create course-specific directory
             course_dir = os.path.join(self.upload_dir, course_id)
             if not os.path.exists(course_dir):
-                os.makedirs(course_dir, exist_ok=True)
-                log.info(f"Created course directory: {course_dir}")
+                try:
+                    os.makedirs(course_dir, exist_ok=True)
+                    log.info(f"Created course directory: {course_dir}")
+                except PermissionError:
+                    raise FileError(
+                        f"Permission denied creating directory: {course_dir}",
+                        operation="create_directory",
+                        file_path=course_dir
+                    )
+                except OSError as e:
+                    raise FileError(
+                        f"Failed to create directory: {str(e)}",
+                        operation="create_directory",
+                        file_path=course_dir
+                    )
             
             # Generate unique filename
             unique_filename = self.generate_unique_filename(filename)
@@ -147,13 +183,50 @@ class FileService:
             # Full file path (ensure absolute path)
             file_path = os.path.abspath(os.path.join(course_dir, unique_filename))
             
-            # Save file
-            with open(file_path, 'wb') as f:
-                f.write(file_data)
+            # Check available disk space
+            if hasattr(os, 'statvfs'):  # Unix-like systems
+                stat = os.statvfs(course_dir)
+                available_space = stat.f_frsize * stat.f_avail
+                if len(file_data) > available_space:
+                    raise FileError(
+                        "Insufficient disk space",
+                        operation="save_file",
+                        file_path=file_path
+                    )
             
-            # Verify file was written successfully
-            if not os.path.exists(file_path) or os.path.getsize(file_path) != len(file_data):
-                raise Exception("File verification failed after write")
+            # Save file with atomic write
+            temp_path = file_path + '.tmp'
+            try:
+                with open(temp_path, 'wb') as f:
+                    f.write(file_data)
+                    f.flush()
+                    os.fsync(f.fileno())  # Force write to disk
+                
+                # Verify file was written successfully
+                if not os.path.exists(temp_path) or os.path.getsize(temp_path) != len(file_data):
+                    raise FileError("File verification failed after write", operation="verify_file")
+                
+                # Atomic move to final location
+                os.rename(temp_path, file_path)
+                
+            except PermissionError:
+                # Clean up temp file if it exists
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                raise FileError(
+                    f"Permission denied writing file: {file_path}",
+                    operation="write_file",
+                    file_path=file_path
+                )
+            except OSError as e:
+                # Clean up temp file if it exists
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                raise FileError(
+                    f"Failed to write file: {str(e)}",
+                    operation="write_file",
+                    file_path=file_path
+                )
             
             # Get file info
             file_size = len(file_data)
@@ -170,9 +243,16 @@ class FileService:
             log.info(f"File saved successfully: {file_path} ({file_size} bytes)")
             return True, file_path, file_info
             
+        except FileError:
+            # Re-raise FileError as-is
+            raise
         except Exception as e:
-            log.error(f"Error saving file: {str(e)}")
-            return False, f"Failed to save file: {str(e)}", None
+            log.error(f"Unexpected error saving file: {str(e)}")
+            raise FileError(
+                f"Failed to save file: {str(e)}",
+                operation="save_file",
+                file_path=filename
+            )
     
     def delete_file(self, file_path: str) -> bool:
         """Delete file from disk"""
@@ -201,29 +281,54 @@ class FileService:
     
     def validate_url(self, url: str) -> Tuple[bool, str]:
         """Validate URL format"""
-        if not url or url.strip() == '':
-            return False, "URL is required"
-        
-        # Basic URL validation
-        if not (url.startswith('http://') or url.startswith('https://')):
-            return False, "URL must start with http:// or https://"
-        
-        # Check for malicious patterns
-        malicious_patterns = ['javascript:', 'data:', 'vbscript:', 'file:', 'ftp:']
-        url_lower = url.lower()
-        for pattern in malicious_patterns:
-            if pattern in url_lower:
-                return False, f"URL contains forbidden protocol: {pattern}"
-        
-        return True, ""
+        try:
+            if not url or url.strip() == '':
+                raise ValidationError("URL is required", field="url")
+            
+            # Basic URL validation
+            if not (url.startswith('http://') or url.startswith('https://')):
+                raise ValidationError("URL must start with http:// or https://", field="url", value=url)
+            
+            # Check for malicious patterns
+            malicious_patterns = ['javascript:', 'data:', 'vbscript:', 'file:', 'ftp:']
+            url_lower = url.lower()
+            for pattern in malicious_patterns:
+                if pattern in url_lower:
+                    raise ValidationError(
+                        f"URL contains forbidden protocol: {pattern}",
+                        field="url",
+                        value=url
+                    )
+            
+            return True, ""
+            
+        except ValidationError:
+            # Re-raise ValidationError as-is
+            raise
+        except Exception as e:
+            log.error(f"Unexpected error during URL validation: {str(e)}")
+            raise ValidationError(f"URL validation failed: {str(e)}", field="url", value=url)
     
     def validate_text_content(self, content: str) -> Tuple[bool, str]:
         """Validate text content"""
-        if not content or content.strip() == '':
-            return False, "Text content is required"
-        
-        # Check content length (max 50KB for text content)
-        if len(content.encode('utf-8')) > 50 * 1024:
-            return False, "Text content is too large (max 50KB)"
-        
-        return True, ""
+        try:
+            if not content or content.strip() == '':
+                raise ValidationError("Text content is required", field="text_content")
+            
+            # Check content length (max 50KB for text content)
+            content_size = len(content.encode('utf-8'))
+            if content_size > 50 * 1024:
+                raise ValidationError(
+                    "Text content is too large (max 50KB)",
+                    field="text_content",
+                    value=f"{content_size} bytes"
+                )
+            
+            return True, ""
+            
+        except ValidationError:
+            # Re-raise ValidationError as-is
+            raise
+        except Exception as e:
+            log.error(f"Unexpected error during text content validation: {str(e)}")
+            raise ValidationError(f"Text content validation failed: {str(e)}", field="text_content")

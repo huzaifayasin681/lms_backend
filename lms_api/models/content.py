@@ -22,6 +22,8 @@ class CourseContent(Base):
     lms_resource_id = Column(String(100))  # Resource ID in LMS
     uploaded_by = Column(Integer, ForeignKey('users.id'), nullable=False)
     upload_date = Column(DateTime(timezone=True), server_default=func.now())
+    visibility = Column(String(20), nullable=False, default='private')  # 'public', 'private'
+    access_level = Column(String(50), nullable=False, default='course_members')  # 'everyone', 'course_members', 'instructors'
     active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -52,6 +54,8 @@ class CourseContent(Base):
             'lms_resource_id': self.lms_resource_id,
             'uploaded_by': self.uploaded_by,
             'upload_date': self.upload_date.isoformat() if self.upload_date else None,
+            'visibility': self.visibility,
+            'access_level': self.access_level,
             'active': self.active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
@@ -75,6 +79,8 @@ class CourseContent(Base):
             external_id=data.get('external_id'),
             lms_resource_id=data.get('lms_resource_id'),
             uploaded_by=user_id,
+            visibility=data.get('visibility', 'private'),
+            access_level=data.get('access_level', 'course_members'),
             active=data.get('active', True)
         )
     

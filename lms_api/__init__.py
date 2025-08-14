@@ -14,10 +14,10 @@ load_dotenv()
 def add_cors_headers_response_callback(event):
     def cors_headers(request, response):
         response.headers.update({
-            'Access-Control-Allow-Origin': os.getenv('CORS_ALLOW_ORIGIN', '*'),
+            'Access-Control-Allow-Origin': os.getenv('CORS_ALLOW_ORIGIN', 'http://localhost:3000'),
             'Access-Control-Allow-Methods': os.getenv('CORS_ALLOW_METHODS', 'POST,GET,DELETE,PUT,OPTIONS'),
             'Access-Control-Allow-Headers': os.getenv('CORS_ALLOW_HEADERS', 'Origin, Content-Type, Accept, Authorization'),
-            'Access-Control-Allow-Credentials': os.getenv('CORS_ALLOW_CREDENTIALS', 'false'),
+            'Access-Control-Allow-Credentials': os.getenv('CORS_ALLOW_CREDENTIALS', 'true'),
             'Access-Control-Max-Age': os.getenv('CORS_MAX_AGE', '1728000'),
         })
     event.request.add_response_callback(cors_headers)
@@ -27,10 +27,10 @@ def options_view(request):
     """Handle OPTIONS preflight requests"""
     response = request.response
     response.headers.update({
-        'Access-Control-Allow-Origin': os.getenv('CORS_ALLOW_ORIGIN', '*'),
+        'Access-Control-Allow-Origin': os.getenv('CORS_ALLOW_ORIGIN', 'http://localhost:3000'),
         'Access-Control-Allow-Methods': os.getenv('CORS_ALLOW_METHODS', 'POST,GET,DELETE,PUT,OPTIONS'),
         'Access-Control-Allow-Headers': os.getenv('CORS_ALLOW_HEADERS', 'Origin, Content-Type, Accept, Authorization'),
-        'Access-Control-Allow-Credentials': os.getenv('CORS_ALLOW_CREDENTIALS', 'false'),
+        'Access-Control-Allow-Credentials': os.getenv('CORS_ALLOW_CREDENTIALS', 'true'),
         'Access-Control-Max-Age': os.getenv('CORS_MAX_AGE', '1728000'),
     })
     return response
@@ -49,10 +49,10 @@ def cors_middleware(app):
             print("CORS Middleware: Handling OPTIONS request")
             # Return a 200 response with CORS headers for all OPTIONS requests
             headers = [
-                ('Access-Control-Allow-Origin', '*'),
+                ('Access-Control-Allow-Origin', 'http://localhost:3000'),
                 ('Access-Control-Allow-Methods', 'POST,GET,DELETE,PUT,OPTIONS'),
                 ('Access-Control-Allow-Headers', 'Origin, Content-Type, Accept, Authorization'),
-                ('Access-Control-Allow-Credentials', 'false'),
+                ('Access-Control-Allow-Credentials', 'true'),
                 ('Access-Control-Max-Age', '1728000'),
                 ('Content-Type', 'text/plain'),
                 ('Content-Length', '0'),
@@ -65,10 +65,10 @@ def cors_middleware(app):
             print(f"CORS Middleware: Adding CORS headers to {method} {path} response")
             # Add CORS headers to all responses
             cors_headers = [
-                ('Access-Control-Allow-Origin', '*'),
+                ('Access-Control-Allow-Origin', 'http://localhost:3000'),
                 ('Access-Control-Allow-Methods', 'POST,GET,DELETE,PUT,OPTIONS'),
                 ('Access-Control-Allow-Headers', 'Origin, Content-Type, Accept, Authorization'),
-                ('Access-Control-Allow-Credentials', 'false'),
+                ('Access-Control-Allow-Credentials', 'true'),
                 ('Access-Control-Max-Age', '1728000'),
             ]
             # Combine existing headers with CORS headers
@@ -86,10 +86,10 @@ def global_options_view(request):
     response = request.response
     response.status = 200
     response.headers.update({
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': 'http://localhost:3000',
         'Access-Control-Allow-Methods': 'POST,GET,DELETE,PUT,OPTIONS',
         'Access-Control-Allow-Headers': 'Origin, Content-Type, Accept, Authorization',
-        'Access-Control-Allow-Credentials': 'false',
+        'Access-Control-Allow-Credentials': 'true',
         'Access-Control-Max-Age': '1728000',
     })
     return response
@@ -101,6 +101,21 @@ def main(global_config, **settings):
     
     # Add a catch-all OPTIONS view
     config.add_notfound_view(global_options_view, request_method='OPTIONS')
+    
+    # Add global error handling
+    from .exceptions import ErrorHandler
+    
+    def error_view(request):
+        """Global error handler for unhandled exceptions"""
+        exc = getattr(request, 'exception', None)
+        if exc:
+            return ErrorHandler.create_error_response(request, exc)
+        return {'error': True, 'message': 'An unexpected error occurred'}
+    
+    # Add error views for different HTTP status codes
+    config.add_view(error_view, context=Exception, renderer='json')
+    config.add_notfound_view(error_view, renderer='json')
+    config.add_forbidden_view(error_view, renderer='json')
     
     # Database setup
     engine = engine_from_config(settings, 'sqlalchemy.')
@@ -116,12 +131,27 @@ def main(global_config, **settings):
     config.add_route('courses', '/api/courses')
     config.add_route('course', '/api/courses/{course_id}')
     config.add_route('sync_courses', '/api/courses/sync')
+    config.add_route('sync_status', '/api/sync/status')
+    config.add_route('force_sync', '/api/sync/force')
+    config.add_route('sync_config', '/api/sync/config')
     
     # Content routes
     config.add_route('course_content', '/api/courses/{course_id}/content')
     config.add_route('content_item', '/api/content/{content_id}')
     config.add_route('content_file', '/api/content/{content_id}/file')
     config.add_route('upload_content', '/api/courses/{course_id}/content/upload')
+    config.add_route('search_content', '/api/content/search')
+    
+    # Moodle API routes
+    config.add_route('moodle_siteinfo', '/api/moodle/siteinfo')
+    config.add_route('moodle_courses', '/api/moodle/courses')
+    config.add_route('moodle_course', '/api/moodle/courses/{course_id}')
+    config.add_route('moodle_enrol', '/api/moodle/enrol')
+    config.add_route('moodle_users_by_field', '/api/moodle/users/by-field')
+    config.add_route('moodle_notifications', '/api/moodle/notifications')
+    config.add_route('moodle_notifications_unread_count', '/api/moodle/notifications/unread-count')
+    config.add_route('moodle_file_upload', '/api/moodle/files/upload')
+    config.add_route('moodle_file_attach', '/api/moodle/files/attach')
     
     # Static files
     config.add_static_view('static', 'static', cache_max_age=3600)

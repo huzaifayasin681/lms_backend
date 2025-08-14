@@ -5,6 +5,7 @@ from ..models import DBSession
 from ..models.course import Course
 from ..auth import require_auth
 from ..services.lms_integration import LMSIntegrationService
+from ..exceptions import ErrorHandler, handle_errors, DatabaseTransaction, ValidationError, ResourceNotFoundError, LMSIntegrationError
 import logging
 import os
 
@@ -23,6 +24,7 @@ def health_check(request):
 
 @view_config(route_name='courses', request_method='GET', renderer='json')
 @require_auth
+@handle_errors
 def get_courses(request):
     """Get all courses with optional filtering"""
     query = DBSession.query(Course)
@@ -94,6 +96,22 @@ def create_course(request):
     
     try:
         course = Course.from_dict(data)
+        
+        # If course specifies an LMS, try to create it in the external system
+        lms_type = data.get('lms', 'local')
+        external_id = None
+        
+        if lms_type != 'local':
+            try:
+                integration_service = LMSIntegrationService()
+                external_id = _create_course_in_external_lms(integration_service, lms_type, data)
+                if external_id:
+                    course.external_id = str(external_id)
+                    log.info(f"Course created in external LMS ({lms_type}) with ID: {external_id}")
+            except Exception as ext_error:
+                log.warning(f"Failed to create course in external LMS ({lms_type}): {str(ext_error)}")
+                # Continue with local creation even if external creation fails
+        
         DBSession.add(course)
         DBSession.commit()
         
@@ -136,10 +154,20 @@ def update_course(request):
     
     try:
         # Update fields
-        updateable_fields = ['name', 'short_name', 'description', 'category', 'lms', 'active']
+        updateable_fields = ['name', 'short_name', 'description', 'category', 'lms', 'active', 'visibility', 'access_level']
         for field in updateable_fields:
             if field in data:
                 setattr(course, field, data[field])
+        
+        # Try to update in external LMS if it has an external_id
+        if course.external_id:
+            try:
+                integration_service = LMSIntegrationService()
+                _update_course_in_external_lms(integration_service, course, data)
+                log.info(f"Course updated in external LMS ({course.lms}) with ID: {course.external_id}")
+            except Exception as ext_error:
+                log.warning(f"Failed to update course in external LMS ({course.lms}): {str(ext_error)}")
+                # Continue with local update even if external update fails
         
         DBSession.commit()
         
@@ -196,6 +224,10 @@ def sync_courses(request):
             result = integration_service.sync_moodle_courses()
         elif lms_type == 'canvas':
             result = integration_service.sync_canvas_courses()
+        elif lms_type == 'sakai':
+            result = integration_service.sync_sakai_courses()
+        elif lms_type == 'chamilo':
+            result = integration_service.sync_chamilo_courses()
         else:
             raise HTTPBadRequest('Unsupported LMS type')
         
@@ -205,3 +237,102 @@ def sync_courses(request):
     except Exception as e:
         log.error(f"Error syncing courses from {lms_type}: {str(e)}")
         raise HTTPBadRequest(f'Error syncing courses: {str(e)}')
+
+
+def _create_course_in_external_lms(integration_service, lms_type, course_data):
+    """Helper function to create course in external LMS"""
+    if lms_type == 'moodle':
+        return integration_service.create_moodle_course(course_data)
+    elif lms_type == 'canvas':
+        return integration_service.create_canvas_course(course_data)
+    elif lms_type == 'sakai':
+        return integration_service.create_sakai_course(course_data)
+    elif lms_type == 'chamilo':
+        return integration_service.create_chamilo_course(course_data)
+    else:
+        raise Exception(f'Unsupported LMS type: {lms_type}')
+
+
+def _update_course_in_external_lms(integration_service, course, course_data):
+    """Helper function to update course in external LMS"""
+    lms_type = course.lms
+    if lms_type == 'local':
+        return  # No external update needed
+        
+    if lms_type == 'moodle':
+        return integration_service.update_moodle_course(course.external_id, course_data)
+    elif lms_type == 'canvas':
+        return integration_service.update_canvas_course(course.external_id, course_data)
+    elif lms_type == 'sakai':
+        return integration_service.update_sakai_course(course.external_id, course_data)
+    elif lms_type == 'chamilo':
+        return integration_service.update_chamilo_course(course.external_id, course_data)
+    else:
+        raise Exception(f'Unsupported LMS type: {lms_type}')
+
+
+@view_config(route_name='sync_status', request_method='GET', renderer='json')
+@require_auth
+def get_sync_status(request):
+    """Get sync service status"""
+    from ..services.sync_service import get_sync_service
+    
+    if not request.user.is_admin:
+        raise HTTPForbidden('Admin access required')
+    
+    sync_service = get_sync_service()
+    return sync_service.get_sync_status()
+
+
+@view_config(route_name='force_sync', request_method='POST', renderer='json')
+@require_auth
+def force_sync(request):
+    """Force immediate sync for all LMS or specific LMS"""
+    from ..services.sync_service import get_sync_service
+    
+    if not request.user.is_admin:
+        raise HTTPForbidden('Admin access required')
+    
+    try:
+        data = request.json_body if request.body else {}
+        lms_type = data.get('lms_type')  # Optional, sync all if not specified
+        
+        sync_service = get_sync_service()
+        result = sync_service.force_sync(lms_type)
+        
+        log.info(f"Force sync initiated by user {request.user.username} for {lms_type or 'all LMS'}")
+        
+        return result
+    except ValueError as e:
+        raise HTTPBadRequest(str(e))
+    except Exception as e:
+        log.error(f"Error in force sync: {str(e)}")
+        raise HTTPBadRequest(f'Sync failed: {str(e)}')
+
+
+@view_config(route_name='sync_config', request_method='POST', renderer='json')
+@require_auth
+def update_sync_config(request):
+    """Update sync service configuration"""
+    from ..services.sync_service import get_sync_service
+    
+    if not request.user.is_admin:
+        raise HTTPForbidden('Admin access required')
+    
+    try:
+        data = request.json_body
+        sync_interval = data.get('sync_interval')
+        
+        if sync_interval:
+            sync_service = get_sync_service()
+            sync_service.set_sync_interval(int(sync_interval))
+            
+        log.info(f"Sync configuration updated by user {request.user.username}")
+        
+        return {"status": "success", "message": "Configuration updated"}
+        
+    except ValueError as e:
+        raise HTTPBadRequest(str(e))
+    except Exception as e:
+        log.error(f"Error updating sync config: {str(e)}")
+        raise HTTPBadRequest(f'Configuration update failed: {str(e)}')
