@@ -167,6 +167,55 @@ class MoodleService:
         # Convert timeout to seconds for requests library
         self.timeout_seconds = self.timeout / 1000.0
     
+    def get_user_token(self, username: str, password: str, service: str = 'moodle_mobile_app') -> str:
+        """
+        Get Moodle web service token for a user
+        This uses Moodle's token generation endpoint
+        
+        Args:
+            username: Moodle username
+            password: Moodle password
+            service: Service name (defaults to moodle_mobile_app)
+            
+        Returns:
+            Web service token
+            
+        Raises:
+            MoodleAuthError: If authentication fails
+            MoodleError: For other errors
+        """
+        # Construct token endpoint URL
+        token_url = self.base_url.replace('/webservice/rest/server.php', '/login/token.php')
+        
+        params = {
+            'username': username,
+            'password': password,
+            'service': service
+        }
+        
+        try:
+            response = requests.post(
+                token_url,
+                params=params,
+                timeout=self.timeout_seconds,
+                headers={
+                    'User-Agent': 'LMS-Backend/1.0'
+                }
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if 'token' in data:
+                return data['token']
+            elif 'error' in data:
+                raise MoodleAuthError(f"Authentication failed: {data['error']}")
+            else:
+                raise MoodleError("Unexpected response from token endpoint")
+                
+        except requests.exceptions.RequestException as e:
+            raise MoodleError(f"Failed to get token: {str(e)}")
+    
     def _normalize_error(self, response_data: Dict[str, Any]) -> MoodleError:
         """
         Normalize Moodle error responses to standard HTTP error types

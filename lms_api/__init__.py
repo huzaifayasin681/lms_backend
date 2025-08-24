@@ -152,6 +152,7 @@ def main(global_config, **settings):
     config.add_route('moodle_notifications_unread_count', '/api/moodle/notifications/unread-count')
     config.add_route('moodle_file_upload', '/api/moodle/files/upload')
     config.add_route('moodle_file_attach', '/api/moodle/files/attach')
+    config.add_route('moodle_login', '/api/moodle/login')
     
     # Static files
     config.add_static_view('static', 'static', cache_max_age=3600)

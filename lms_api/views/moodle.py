@@ -247,6 +247,61 @@ def update_course(request):
         handle_moodle_error(e)
 
 
+@view_config(route_name='moodle_login', request_method='POST', renderer='json')
+def moodle_login(request):
+    """
+    POST /api/moodle/login
+    
+    Authenticate user with Moodle credentials and return user info
+    Body:
+    {
+        "username": "moodle_username",
+        "password": "moodle_password"
+    }
+    """
+    try:
+        data = request.json_body
+    except ValueError:
+        raise HTTPBadRequest('Invalid JSON')
+    
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        raise HTTPBadRequest('Username and password required')
+    
+    try:
+        # Get configured Moodle service
+        moodle = get_moodle_service()
+        
+        # Get token using username/password
+        token = moodle.get_user_token(username, password)
+        
+        # Create a temporary service with the user's token to get their info
+        user_moodle_service = MoodleService(
+            base_url=moodle.base_url.replace('/webservice/rest/server.php', ''),
+            token=token
+        )
+        user_info = user_moodle_service.get_site_info()
+        
+        return normalize_moodle_response({
+            'token': token,
+            'user': {
+                'id': user_info.get('userid'),
+                'username': user_info.get('username'),
+                'firstname': user_info.get('firstname'),
+                'lastname': user_info.get('lastname'),
+                'fullname': user_info.get('fullname'),
+                'email': user_info.get('email', ''),
+                'profileimageurl': user_info.get('userpictureurl', '')
+            }
+        })
+        
+    except MoodleAuthError as e:
+        raise HTTPUnauthorized(str(e))
+    except Exception as e:
+        handle_moodle_error(e)
+
 @view_config(route_name='moodle_enrol', request_method='POST', renderer='json')
 @require_auth
 def enrol_users(request):
