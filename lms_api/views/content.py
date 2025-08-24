@@ -466,7 +466,8 @@ def serve_content_file(request):
             response.headers['Content-Security-Policy'] = "frame-ancestors 'self'"
         
         # Ensure proper CORS headers are set
-        response.headers['Access-Control-Allow-Origin'] = '*'
+        cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://jhbnet.ddns.net:46543')
+        response.headers['Access-Control-Allow-Origin'] = cors_origin
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         
         log.info(f"File served successfully: {content.file_name} ({file_size} bytes) - Content-Type: {content_type}")

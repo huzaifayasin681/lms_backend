@@ -24,9 +24,13 @@ for key in os.environ:
 
 def add_cors_headers_response_callback(event):
     def cors_headers(request, response):
-        cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://localhost:3000')
+        cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://jhbnet.ddns.net:46543')
+        request_origin = request.headers.get('Origin', '')
+        
         print(f"DEBUG: CORS Origin from env: {cors_origin}")
-        print(f"DEBUG: Request Origin: {request.headers.get('Origin', 'No Origin header')}")
+        print(f"DEBUG: Request Origin: {request_origin}")
+        print(f"DEBUG: Using CORS Origin: {cors_origin}")
+        
         response.headers.update({
             'Access-Control-Allow-Origin': cors_origin,
             'Access-Control-Allow-Methods': os.getenv('CORS_ALLOW_METHODS', 'POST,GET,DELETE,PUT,OPTIONS'),
@@ -40,8 +44,13 @@ def add_cors_headers_response_callback(event):
 def options_view(request):
     """Handle OPTIONS preflight requests"""
     response = request.response
-    cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://localhost:3000')
-    print(f"DEBUG: OPTIONS view - CORS Origin: {cors_origin}")
+    cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://jhbnet.ddns.net:46543')
+    request_origin = request.headers.get('Origin', '')
+    
+    print(f"DEBUG: OPTIONS view - CORS Origin from env: {cors_origin}")
+    print(f"DEBUG: OPTIONS view - Request Origin: {request_origin}")
+    print(f"DEBUG: OPTIONS view - Using CORS Origin: {cors_origin}")
+    
     response.headers.update({
         'Access-Control-Allow-Origin': cors_origin,
         'Access-Control-Allow-Methods': os.getenv('CORS_ALLOW_METHODS', 'POST,GET,DELETE,PUT,OPTIONS'),
@@ -59,11 +68,12 @@ def cors_middleware(app):
         method = environ.get('REQUEST_METHOD')
         path = environ.get('PATH_INFO', '')
         origin = environ.get('HTTP_ORIGIN', 'No Origin')
-        cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://localhost:3000')
+        cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://jhbnet.ddns.net:46543')
         
         print(f"CORS Middleware: {method} {path}")
         print(f"CORS Middleware: Request Origin: {origin}")
         print(f"CORS Middleware: Configured CORS Origin: {cors_origin}")
+        print(f"CORS Middleware: Using CORS Origin: {cors_origin}")
         
         # Check if this is an OPTIONS request
         if method == 'OPTIONS':
@@ -106,8 +116,13 @@ def global_options_view(request):
     """Global OPTIONS handler for all API endpoints"""
     response = request.response
     response.status = 200
-    cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://localhost:3000')
-    print(f"DEBUG: Global OPTIONS view - CORS Origin: {cors_origin}")
+    cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://jhbnet.ddns.net:46543')
+    request_origin = request.headers.get('Origin', '')
+    
+    print(f"DEBUG: Global OPTIONS view - CORS Origin from env: {cors_origin}")
+    print(f"DEBUG: Global OPTIONS view - Request Origin: {request_origin}")
+    print(f"DEBUG: Global OPTIONS view - Using CORS Origin: {cors_origin}")
+    
     response.headers.update({
         'Access-Control-Allow-Origin': cors_origin,
         'Access-Control-Allow-Methods': 'POST,GET,DELETE,PUT,OPTIONS',

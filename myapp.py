@@ -16,18 +16,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Debug: Print environment variables
 print(f"DEBUG myapp.py: CORS_ALLOW_ORIGIN from env: {os.getenv('CORS_ALLOW_ORIGIN', 'NOT_SET')}")
+print(f"DEBUG myapp.py: Current working directory: {os.getcwd()}")
+print(f"DEBUG myapp.py: .env file exists: {os.path.exists('.env')}")
+print(f"DEBUG myapp.py: All CORS-related env vars:")
+for key in os.environ:
+    if 'CORS' in key:
+        print(f"  {key}={os.environ[key]}")
 
 # Create Flask app for serving React frontend
 frontend_app = Flask(__name__)
 
-# Enable CORS for all routes - use environment variable for dynamic configuration
-cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://localhost:3000')
-cors_origins = ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:6543', 'http://127.0.0.1:6543']
-if cors_origin not in cors_origins:
-    cors_origins.append(cors_origin)
-
-print(f"DEBUG myapp.py: Flask CORS origins: {cors_origins}")
-CORS(frontend_app, origins=cors_origins)
+# Enable CORS for all routes - use ONLY environment variable
+cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://jhbnet.ddns.net:46543')
+print(f"DEBUG myapp.py: Flask CORS origin: {cors_origin}")
+CORS(frontend_app, origins=[cors_origin], supports_credentials=True)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
