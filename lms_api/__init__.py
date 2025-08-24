@@ -7,8 +7,19 @@ from .models.user import User
 from .models.content import CourseContent
 import os
 from dotenv import load_dotenv
+import sys
 
+# Load environment variables
 load_dotenv()
+
+# Debug: Print environment variables
+print(f"DEBUG: Python path: {sys.path}")
+print(f"DEBUG: Current working directory: {os.getcwd()}")
+print(f"DEBUG: CORS_ALLOW_ORIGIN from env: {os.getenv('CORS_ALLOW_ORIGIN', 'NOT_SET')}")
+print(f"DEBUG: All CORS env vars:")
+for key in os.environ:
+    if 'CORS' in key:
+        print(f"  {key}={os.environ[key]}")
 
 
 def add_cors_headers_response_callback(event):

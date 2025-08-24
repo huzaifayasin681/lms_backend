@@ -6,15 +6,28 @@ import logging
 from waitress import serve
 from pyramid.paster import get_app
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Add the backend directory to Python path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Debug: Print environment variables
+print(f"DEBUG myapp.py: CORS_ALLOW_ORIGIN from env: {os.getenv('CORS_ALLOW_ORIGIN', 'NOT_SET')}")
+
 # Create Flask app for serving React frontend
 frontend_app = Flask(__name__)
 
-# Enable CORS for all routes
-CORS(frontend_app, origins=['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:6543', 'http://127.0.0.1:6543', 'http://jhbnet.ddns.net:46543'])
+# Enable CORS for all routes - use environment variable for dynamic configuration
+cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://localhost:3000')
+cors_origins = ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:6543', 'http://127.0.0.1:6543']
+if cors_origin not in cors_origins:
+    cors_origins.append(cors_origin)
+
+print(f"DEBUG myapp.py: Flask CORS origins: {cors_origins}")
+CORS(frontend_app, origins=cors_origins)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
