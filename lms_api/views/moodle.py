@@ -162,7 +162,6 @@ def list_courses(request):
 
 
 @view_config(route_name='moodle_courses', request_method='POST', renderer='json')
-@require_auth
 def create_course(request):
     """
     POST /api/moodle/courses
@@ -207,7 +206,6 @@ def create_course(request):
 
 
 @view_config(route_name='moodle_course', request_method='PATCH', renderer='json')
-@require_auth
 def update_course(request):
     """
     PATCH /api/moodle/courses/{course_id}
@@ -314,7 +312,6 @@ def moodle_login(request):
         handle_moodle_error(e)
 
 @view_config(route_name='moodle_enrol', request_method='POST', renderer='json')
-@require_auth
 def enrol_users(request):
     """
     POST /api/moodle/enrol
@@ -379,7 +376,6 @@ def enrol_users(request):
 
 
 @view_config(route_name='moodle_users_by_field', request_method='GET', renderer='json')
-@require_auth
 def get_users_by_field(request):
     """
     GET /api/moodle/users/by-field?field=email&values=user1@example.com,user2@example.com
@@ -441,7 +437,6 @@ def validate_userid_param(request):
 
 
 @view_config(route_name='moodle_notifications', request_method='GET', renderer='json')
-@require_auth
 def get_notifications(request):
     """
     GET /api/moodle/notifications?userid=123&limit=20&offset=0
@@ -480,7 +475,6 @@ def get_notifications(request):
 
 
 @view_config(route_name='moodle_notifications_unread_count', request_method='GET', renderer='json')
-@require_auth
 def get_unread_count(request):
     """
     GET /api/moodle/notifications/unread-count?userid=123
@@ -503,7 +497,6 @@ def get_unread_count(request):
 
 
 @view_config(route_name='moodle_file_upload', request_method='POST', renderer='json')
-@require_auth
 def upload_file(request):
     """
     POST /api/moodle/files/upload
@@ -567,7 +560,6 @@ def upload_file(request):
 
 
 @view_config(route_name='moodle_file_attach', request_method='POST', renderer='json')
-@require_auth
 def attach_file_to_course(request):
     """
     POST /api/moodle/files/attach
