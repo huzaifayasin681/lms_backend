@@ -796,6 +796,52 @@ def get_moodle_instructor_dashboard(request):
         
     except Exception as e:
         handle_moodle_error(e)
+@view_config(route_name='moodle_course_contents', request_method='GET', renderer='json')
+def get_moodle_course_contents(request):
+    """
+    GET /api/moodle/courses/{course_id}/contents
+    
+    Get course contents/modules
+    """
+    course_id = request.matchdict['course_id']
+    
+    try:
+        course_id_int = int(course_id)
+    except ValueError:
+        raise HTTPBadRequest('Invalid course ID')
+    
+    try:
+        moodle = get_moodle_service()
+        contents = moodle.get_course_contents(course_id_int)
+        return normalize_moodle_response(contents)
+    except Exception as e:
+        handle_moodle_error(e)
+
+
+@view_config(route_name='moodle_content_delete', request_method='DELETE', renderer='json')
+def delete_moodle_content(request):
+    """
+    DELETE /api/moodle/content/{module_id}
+    
+    Delete specific course content/module
+    """
+    module_id = request.matchdict['module_id']
+    
+    try:
+        module_id_int = int(module_id)
+    except ValueError:
+        raise HTTPBadRequest('Invalid module ID')
+    
+    try:
+        moodle = get_moodle_service()
+        moodle.delete_course_module(module_id_int)
+        
+        log.info(f"Course module deleted from Moodle: {module_id}")
+        return normalize_moodle_response({'message': 'Content deleted successfully'})
+    except Exception as e:
+        handle_moodle_error(e)
+
+
 @view_config(route_name='moodle_file_upload_course', request_method='POST', renderer='json')
 def upload_file_to_course(request):
     """
