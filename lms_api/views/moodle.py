@@ -615,13 +615,108 @@ def get_categories(request):
     """
     try:
         moodle = get_moodle_service()
-        categories = moodle.call('core_course_get_categories')
+        categories = moodle.get_course_categories()
         return normalize_moodle_response(categories)
     except Exception as e:
         handle_moodle_error(e)
 
 
-@view_config(route_name='moodle_users', request_method='POST', renderer='json')
+@view_config(route_name='moodle_users', request_method='GET', renderer='json')
+def get_users(request):
+    """
+    GET /api/moodle/users?criteria=[{"key":"email","value":"user@example.com"}]
+    
+    Get users using core_user_get_users function
+    
+    Query parameters:
+    - criteria: JSON array of search criteria objects
+    """
+    criteria_param = request.params.get('criteria')
+    criteria = None
+    
+    if criteria_param:
+        try:
+            import json
+            criteria = json.loads(criteria_param)
+            if not isinstance(criteria, list):
+                raise HTTPBadRequest('Criteria must be an array')
+        except (ValueError, TypeError):
+            raise HTTPBadRequest('Invalid criteria JSON format')
+    
+    try:
+        moodle = get_moodle_service()
+        users = moodle.get_users(criteria)
+        
+        # Filter sensitive user information
+        filtered_users = [{
+            'id': user.get('id'),
+            'username': user.get('username'),
+            'firstname': user.get('firstname'),
+            'lastname': user.get('lastname'),
+            'email': user.get('email'),
+            'profileimageurl': user.get('profileimageurl', '')
+        } for user in users]
+        
+        return normalize_moodle_response(filtered_users)
+    except Exception as e:
+        handle_moodle_error(e)
+
+
+@view_config(route_name='moodle_files_upload_core', request_method='POST', renderer='json')
+def upload_file_core(request):
+    """
+    POST /api/moodle/files/upload-core
+    
+    Upload file using core_files_upload web service function
+    
+    Multipart form data:
+    - file: File to upload
+    - contextid: Context ID (optional, default 1)
+    - component: Component name (optional, default 'user')
+    - filearea: File area (optional, default 'draft')
+    - itemid: Item ID (optional, default 0)
+    - filepath: File path (optional, default '/')
+    """
+    if 'file' not in request.POST:
+        raise HTTPBadRequest('No file uploaded')
+    
+    file_obj = request.POST['file']
+    if not hasattr(file_obj, 'filename') or not file_obj.filename:
+        raise HTTPBadRequest('Invalid file')
+    
+    # Get optional parameters
+    try:
+        contextid = int(request.POST.get('contextid', 1))
+        itemid = int(request.POST.get('itemid', 0))
+    except ValueError:
+        raise HTTPBadRequest('Invalid contextid or itemid')
+    
+    component = request.POST.get('component', 'user')
+    filearea = request.POST.get('filearea', 'draft')
+    filepath = request.POST.get('filepath', '/')
+    
+    try:
+        file_obj.file.seek(0)
+        file_data = file_obj.file.read()
+        
+        moodle = get_moodle_service()
+        result = moodle.upload_file_core(
+            file_data=file_data,
+            filename=file_obj.filename,
+            contextid=contextid,
+            component=component,
+            filearea=filearea,
+            itemid=itemid,
+            filepath=filepath
+        )
+        
+        log.info(f"File uploaded via core_files_upload: {file_obj.filename}")
+        return normalize_moodle_response(result)
+    except Exception as e:
+        handle_moodle_error(e)
+
+
+@view_config(route_name='moodle_users_create', request_method='POST', renderer='json')
 def create_user(request):
     """
     POST /api/moodle/users

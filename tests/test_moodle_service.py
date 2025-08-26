@@ -472,3 +472,46 @@ class TestMoodleServiceHelpers:
         fallback_call = mock_call.call_args_list[1]
         assert fallback_call[0][0] == 'core_message_get_popup_notifications'
         assert fallback_call[0][1]['userid'] == 123
+    
+    @patch('lms_api.services.moodle_service.MoodleService.call')
+    def test_get_users(self, mock_call, moodle_service):
+        """Test get_users helper method"""
+        mock_call.return_value = {
+            'users': [
+                {'id': 1, 'username': 'user1', 'email': 'user1@test.com'},
+                {'id': 2, 'username': 'user2', 'email': 'user2@test.com'}
+            ]
+        }
+        
+        criteria = [{'key': 'email', 'value': 'user1@test.com'}]
+        result = moodle_service.get_users(criteria)
+        
+        mock_call.assert_called_once_with('core_user_get_users', {'criteria': criteria})
+        assert len(result) == 2
+        assert result[0]['username'] == 'user1'
+    
+    @patch('lms_api.services.moodle_service.MoodleService.call')
+    def test_upload_file_core(self, mock_call, moodle_service):
+        """Test upload_file_core helper method"""
+        mock_call.return_value = [{'filename': 'test.txt', 'fileurl': 'http://example.com/file'}]
+        
+        file_data = b'test file content'
+        result = moodle_service.upload_file_core(
+            file_data=file_data,
+            filename='test.txt',
+            contextid=1,
+            component='user',
+            filearea='draft'
+        )
+        
+        # Verify the call was made with base64 encoded content
+        mock_call.assert_called_once()
+        call_args = mock_call.call_args[0][1]
+        assert call_args['filename'] == 'test.txt'
+        assert call_args['contextid'] == 1
+        assert call_args['component'] == 'user'
+        assert call_args['filearea'] == 'draft'
+        assert 'filecontent' in call_args  # Base64 encoded content
+        
+        assert len(result) == 1
+        assert result[0]['filename'] == 'test.txt'

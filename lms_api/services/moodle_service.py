@@ -765,6 +765,61 @@ class MoodleService:
         result = self.call('core_course_get_categories')
         return result if isinstance(result, list) else []
     
+    def get_users(self, criteria: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """
+        Get users using core_user_get_users function
+        
+        Args:
+            criteria: List of search criteria objects with keys and values
+                     Example: [{'key': 'email', 'value': 'user@example.com'}]
+        
+        Returns:
+            List of user objects
+        """
+        params = {}
+        if criteria:
+            params['criteria'] = criteria
+        
+        result = self.call('core_user_get_users', params)
+        return result.get('users', []) if isinstance(result, dict) else []
+    
+    def upload_file_core(self, file_data: bytes, filename: str, 
+                        contextid: int = 1, component: str = 'user', 
+                        filearea: str = 'draft', itemid: int = 0,
+                        filepath: str = '/') -> List[Dict[str, Any]]:
+        """
+        Upload file using core_files_upload web service function
+        
+        Args:
+            file_data: File content as bytes
+            filename: Name of the file
+            contextid: Context ID (default 1 for system context)
+            component: Component name (default 'user')
+            filearea: File area (default 'draft')
+            itemid: Item ID (default 0 for new draft)
+            filepath: File path within the file area (default '/')
+            
+        Returns:
+            List of uploaded file objects
+        """
+        import base64
+        
+        # Encode file data as base64 for the web service
+        file_content_b64 = base64.b64encode(file_data).decode('utf-8')
+        
+        params = {
+            'contextid': contextid,
+            'component': component,
+            'filearea': filearea,
+            'itemid': itemid,
+            'filepath': filepath,
+            'filename': filename,
+            'filecontent': file_content_b64
+        }
+        
+        result = self.call('core_files_upload', params)
+        return result if isinstance(result, list) else []
+    
     def search_courses(self, search_term: str, page: int = 0, perpage: int = 20) -> Dict[str, Any]:
         """
         Search courses by name or description

@@ -221,6 +221,8 @@ def main(global_config, **settings):
     config.add_route('moodle_login', '/moodle/login')
     config.add_route('moodle_categories', '/moodle/categories')
     config.add_route('moodle_users', '/moodle/users')
+    config.add_route('moodle_users_create', '/moodle/users/create')
+    config.add_route('moodle_files_upload_core', '/moodle/files/upload-core')
     
     # Static files
     config.add_static_view('static', 'static', cache_max_age=3600)
