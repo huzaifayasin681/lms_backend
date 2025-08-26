@@ -660,8 +660,15 @@ class MoodleService:
             'courseid': courseid
         }
         
-        result = self.call('core_course_get_contents', params)
-        return result if isinstance(result, list) else []
+        try:
+            result = self.call('core_course_get_contents', params)
+            return result if isinstance(result, list) else []
+        except MoodleError as e:
+            if e.error_code in ['invalidfunction', 'nopermissions', 'accessexception']:
+                # Function not available, return empty list with message
+                log.warning(f"core_course_get_contents not available: {e.error_code}")
+                return []
+            raise
     
     def delete_course_module(self, cmid: int) -> Dict[str, Any]:
         """
