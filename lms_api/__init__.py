@@ -216,6 +216,7 @@ def main(global_config, **settings):
     config.add_route('moodle_file_upload', '/moodle/files/upload')
     config.add_route('moodle_file_attach', '/moodle/files/attach')
     config.add_route('moodle_validate_file', '/moodle/validate-file')
+    config.add_route('moodle_file_upload_course', '/moodle/courses/{course_id}/upload')
     config.add_route('moodle_instructor_dashboard', '/moodle/instructor/dashboard')
     config.add_route('moodle_login', '/moodle/login')
     config.add_route('moodle_categories', '/moodle/categories')

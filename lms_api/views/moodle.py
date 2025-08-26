@@ -128,8 +128,12 @@ def list_courses(request):
     - category: Filter by category ID
     """
     try:
+        log.info("[MOODLE API] Getting courses list...")
         moodle = get_moodle_service()
         courses = moodle.list_courses()
+        
+        log.info(f"[MOODLE API] Raw courses from service: {len(courses) if courses else 0} courses")
+        log.info(f"[MOODLE API] First course sample: {courses[0] if courses else 'None'}")
         
         # Apply client-side filtering if needed
         search = request.params.get('search')
@@ -143,6 +147,7 @@ def list_courses(request):
                 if search_lower in fullname_lower or search_lower in shortname_lower:
                     filtered_courses.append(course)
             courses = filtered_courses
+            log.info(f"[MOODLE API] After search filter: {len(courses)} courses")
         
         category = request.params.get('category')
         if category:
@@ -152,12 +157,15 @@ def list_courses(request):
                     course for course in courses
                     if course.get('categoryid') == category_id
                 ]
+                log.info(f"[MOODLE API] After category filter: {len(courses)} courses")
             except ValueError:
                 raise HTTPBadRequest("Invalid category ID")
         
+        log.info(f"[MOODLE API] Final courses to return: {len(courses)} courses")
         return normalize_moodle_response(courses)
         
     except Exception as e:
+        log.error(f"[MOODLE API] Error getting courses: {str(e)}")
         handle_moodle_error(e)
 
 
@@ -786,5 +794,65 @@ def get_moodle_instructor_dashboard(request):
         
         return normalize_moodle_response(dashboard_data)
         
+    except Exception as e:
+        handle_moodle_error(e)
+@view_config(route_name='moodle_file_upload_course', request_method='POST', renderer='json')
+def upload_file_to_course(request):
+    """
+    POST /api/moodle/courses/{course_id}/upload
+    
+    Upload file directly to a course
+    """
+    course_id = request.matchdict['course_id']
+    
+    try:
+        course_id_int = int(course_id)
+    except ValueError:
+        raise HTTPBadRequest('Invalid course ID')
+    
+    if 'file' not in request.POST:
+        raise HTTPBadRequest('No file uploaded')
+    
+    file_obj = request.POST['file']
+    if not hasattr(file_obj, 'filename') or not file_obj.filename:
+        raise HTTPBadRequest('Invalid file')
+    
+    # Validate file size
+    file_obj.file.seek(0, 2)
+    file_size = file_obj.file.tell()
+    file_obj.file.seek(0)
+    
+    MAX_SIZE = 100 * 1024 * 1024  # 100MB
+    if file_size > MAX_SIZE:
+        raise HTTPBadRequest(f'File too large. Max 100MB, got {file_size/1024/1024:.1f}MB')
+    
+    try:
+        file_data = file_obj.file.read()
+        
+        moodle = get_moodle_service()
+        
+        # Upload to draft area first
+        upload_result = moodle.upload_file(
+            file_data=file_data,
+            filename=file_obj.filename
+        )
+        
+        # Attach to course if upload successful
+        if 'draftitemid' in upload_result:
+            attach_result = moodle.attach_file_to_course_resource(
+                courseid=course_id_int,
+                draftitemid=upload_result['draftitemid'],
+                name=request.POST.get('name', file_obj.filename),
+                intro=request.POST.get('intro', '')
+            )
+            
+            log.info(f"File uploaded to course {course_id}: {file_obj.filename}")
+            return normalize_moodle_response({
+                'upload': upload_result,
+                'attach': attach_result,
+                'message': 'File uploaded successfully'
+            })
+        
+        return normalize_moodle_response(upload_result)
     except Exception as e:
         handle_moodle_error(e)
