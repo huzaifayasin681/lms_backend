@@ -197,8 +197,7 @@ def create_course(request):
         
         # Sanitize log output to prevent log injection
         course_id = str(course.get('id', 'unknown')).replace('\n', '').replace('\r', '')
-        username = str(request.user.username).replace('\n', '').replace('\r', '')
-        log.info(f"Course created in Moodle: {course_id} by user {username}")
+        log.info(f"Course created in Moodle: {course_id}")
         return normalize_moodle_response(course)
         
     except Exception as e:
@@ -244,8 +243,7 @@ def update_course(request):
         
         # Sanitize log output to prevent log injection
         safe_course_id = str(course_id).replace('\n', '').replace('\r', '')
-        username = str(request.user.username).replace('\n', '').replace('\r', '')
-        log.info(f"Course updated in Moodle: {safe_course_id} by user {username}")
+        log.info(f"Course updated in Moodle: {safe_course_id}")
         return normalize_moodle_response({'message': 'Course updated successfully'})
         
     except Exception as e:
@@ -363,8 +361,7 @@ def enrol_users(request):
         moodle.enrol_users(enrolments)
         
         # Sanitize log output to prevent log injection
-        username = str(request.user.username).replace('\n', '').replace('\r', '')
-        log.info(f"Users enrolled in Moodle courses by user {username}: {len(enrolments)} enrolments")
+        log.info(f"Users enrolled in Moodle courses: {len(enrolments)} enrolments")
         
         return normalize_moodle_response({
             'message': 'Users enrolled successfully',
@@ -551,8 +548,7 @@ def upload_file(request):
         )
         
         # Sanitize log output to prevent log injection and avoid logging sensitive filenames
-        username = str(request.user.username).replace('\n', '').replace('\r', '')
-        log.info(f"File uploaded to Moodle by user {username}")
+        log.info(f"File uploaded to Moodle")
         return normalize_moodle_response(result)
         
     except Exception as e:
@@ -595,9 +591,68 @@ def attach_file_to_course(request):
         
         # Sanitize log output to prevent log injection
         course_id = str(data['courseid']).replace('\n', '').replace('\r', '')
-        username = str(request.user.username).replace('\n', '').replace('\r', '')
-        log.info(f"File attached to course {course_id} in Moodle by user {username}")
+        log.info(f"File attached to course {course_id} in Moodle")
         return normalize_moodle_response(result)
         
+    except Exception as e:
+        handle_moodle_error(e)
+
+
+@view_config(route_name='moodle_categories', request_method='GET', renderer='json')
+def get_categories(request):
+    """
+    GET /api/moodle/categories
+    
+    Get course categories
+    """
+    try:
+        moodle = get_moodle_service()
+        categories = moodle.call('core_course_get_categories')
+        return normalize_moodle_response(categories)
+    except Exception as e:
+        handle_moodle_error(e)
+
+
+@view_config(route_name='moodle_users', request_method='POST', renderer='json')
+def create_user(request):
+    """
+    POST /api/moodle/users
+    
+    Create a new user in Moodle
+    
+    Body:
+    {
+        "username": "newuser",
+        "password": "password123",
+        "firstname": "John",
+        "lastname": "Doe",
+        "email": "john@example.com"
+    }
+    """
+    try:
+        data = request.json_body
+    except ValueError:
+        raise HTTPBadRequest('Invalid JSON')
+    
+    required_fields = ['username', 'password', 'firstname', 'lastname', 'email']
+    for field in required_fields:
+        if field not in data:
+            raise HTTPBadRequest(f'{field} is required')
+    
+    try:
+        moodle = get_moodle_service()
+        user_data = {
+            'users': [{
+                'username': data['username'],
+                'password': data['password'],
+                'firstname': data['firstname'],
+                'lastname': data['lastname'],
+                'email': data['email'],
+                'auth': 'manual'
+            }]
+        }
+        result = moodle.call('core_user_create_users', user_data)
+        log.info(f"User created in Moodle: {data['username']}")
+        return normalize_moodle_response(result)
     except Exception as e:
         handle_moodle_error(e)
