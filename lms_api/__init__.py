@@ -24,8 +24,9 @@ for key in os.environ:
 
 def add_cors_headers_response_callback(event):
     def cors_headers(request, response):
-        cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://jhbnet.ddns.net:46543')
+        allowed_origins = os.getenv('CORS_ALLOW_ORIGIN', 'http://localhost:1234').split(',')
         request_origin = request.headers.get('Origin', '')
+        cors_origin = request_origin if request_origin in allowed_origins else allowed_origins[0]
         
         print(f"DEBUG: CORS Origin from env: {cors_origin}")
         print(f"DEBUG: Request Origin: {request_origin}")
@@ -44,8 +45,9 @@ def add_cors_headers_response_callback(event):
 def options_view(request):
     """Handle OPTIONS preflight requests"""
     response = request.response
-    cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://jhbnet.ddns.net:46543')
+    allowed_origins = os.getenv('CORS_ALLOW_ORIGIN', 'http://localhost:1234').split(',')
     request_origin = request.headers.get('Origin', '')
+    cors_origin = request_origin if request_origin in allowed_origins else allowed_origins[0]
     
     print(f"DEBUG: OPTIONS view - CORS Origin from env: {cors_origin}")
     print(f"DEBUG: OPTIONS view - Request Origin: {request_origin}")
@@ -68,11 +70,14 @@ def cors_middleware(app):
         method = environ.get('REQUEST_METHOD')
         path = environ.get('PATH_INFO', '')
         origin = environ.get('HTTP_ORIGIN', 'No Origin')
-        cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://jhbnet.ddns.net:46543')
+        
+        # Handle multiple CORS origins
+        allowed_origins = os.getenv('CORS_ALLOW_ORIGIN', 'http://localhost:1234').split(',')
+        cors_origin = origin if origin in allowed_origins else allowed_origins[0]
         
         print(f"CORS Middleware: {method} {path}")
         print(f"CORS Middleware: Request Origin: {origin}")
-        print(f"CORS Middleware: Configured CORS Origin: {cors_origin}")
+        print(f"CORS Middleware: Allowed Origins: {allowed_origins}")
         print(f"CORS Middleware: Using CORS Origin: {cors_origin}")
         
         # Check if this is an OPTIONS request
@@ -116,8 +121,9 @@ def global_options_view(request):
     """Global OPTIONS handler for all API endpoints"""
     response = request.response
     response.status = 200
-    cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://jhbnet.ddns.net:46543')
+    allowed_origins = os.getenv('CORS_ALLOW_ORIGIN', 'http://localhost:1234').split(',')
     request_origin = request.headers.get('Origin', '')
+    cors_origin = request_origin if request_origin in allowed_origins else allowed_origins[0]
     
     print(f"DEBUG: Global OPTIONS view - CORS Origin from env: {cors_origin}")
     print(f"DEBUG: Global OPTIONS view - Request Origin: {request_origin}")
@@ -140,6 +146,10 @@ def main(global_config, **settings):
     # Add a catch-all OPTIONS view
     config.add_notfound_view(global_options_view, request_method='OPTIONS')
     
+    # Add route for OPTIONS on all auth routes
+    config.add_view(global_options_view, route_name='login', request_method='OPTIONS', renderer='json')
+    config.add_view(global_options_view, route_name='register', request_method='OPTIONS', renderer='json')
+    
     # Add global error handling
     from .exceptions import ErrorHandler
     
@@ -160,43 +170,49 @@ def main(global_config, **settings):
     DBSession.configure(bind=engine)
     Base.metadata.bind = engine
     
-    # Routes
-    config.add_route('health', '/api/health')
-    config.add_route('login', '/api/auth/login')
-    config.add_route('register', '/api/auth/register')
+    # Routes (no /api prefix since app is mounted under /api)
+    config.add_route('health', '/health')
+    config.add_route('login', '/auth/login')
+    config.add_route('register', '/auth/register')
+    
+    # Debug: Print registered routes
+    print("DEBUG: Registered routes:")
+    print(f"  health: /health")
+    print(f"  login: /auth/login")
+    print(f"  register: /auth/register")
     
     # Course routes
-    config.add_route('courses', '/api/courses')
-    config.add_route('course', '/api/courses/{course_id}')
-    config.add_route('sync_courses', '/api/courses/sync')
-    config.add_route('sync_status', '/api/sync/status')
-    config.add_route('force_sync', '/api/sync/force')
-    config.add_route('sync_config', '/api/sync/config')
+    config.add_route('courses', '/courses')
+    config.add_route('course', '/courses/{course_id}')
+    config.add_route('sync_courses', '/courses/sync')
+    config.add_route('sync_status', '/sync/status')
+    config.add_route('force_sync', '/sync/force')
+    config.add_route('sync_config', '/sync/config')
     
     # Content routes
-    config.add_route('course_content', '/api/courses/{course_id}/content')
-    config.add_route('content_item', '/api/content/{content_id}')
-    config.add_route('content_file', '/api/content/{content_id}/file')
-    config.add_route('upload_content', '/api/courses/{course_id}/content/upload')
-    config.add_route('search_content', '/api/content/search')
+    config.add_route('course_content', '/courses/{course_id}/content')
+    config.add_route('content_item', '/content/{content_id}')
+    config.add_route('content_file', '/content/{content_id}/file')
+    config.add_route('upload_content', '/courses/{course_id}/content/upload')
+    config.add_route('search_content', '/content/search')
     
     # Moodle API routes
-    config.add_route('moodle_siteinfo', '/api/moodle/siteinfo')
-    config.add_route('moodle_courses', '/api/moodle/courses')
-    config.add_route('moodle_course', '/api/moodle/courses/{course_id}')
-    config.add_route('moodle_enrol', '/api/moodle/enrol')
-    config.add_route('moodle_users_by_field', '/api/moodle/users/by-field')
-    config.add_route('moodle_notifications', '/api/moodle/notifications')
-    config.add_route('moodle_notifications_unread_count', '/api/moodle/notifications/unread-count')
-    config.add_route('moodle_file_upload', '/api/moodle/files/upload')
-    config.add_route('moodle_file_attach', '/api/moodle/files/attach')
-    config.add_route('moodle_login', '/api/moodle/login')
+    config.add_route('moodle_siteinfo', '/moodle/siteinfo')
+    config.add_route('moodle_courses', '/moodle/courses')
+    config.add_route('moodle_course', '/moodle/courses/{course_id}')
+    config.add_route('moodle_enrol', '/moodle/enrol')
+    config.add_route('moodle_users_by_field', '/moodle/users/by-field')
+    config.add_route('moodle_notifications', '/moodle/notifications')
+    config.add_route('moodle_notifications_unread_count', '/moodle/notifications/unread-count')
+    config.add_route('moodle_file_upload', '/moodle/files/upload')
+    config.add_route('moodle_file_attach', '/moodle/files/attach')
+    config.add_route('moodle_login', '/moodle/login')
     
     # Static files
     config.add_static_view('static', 'static', cache_max_age=3600)
     
     # Scan for view configurations
-    config.scan()
+    config.scan('.views')
     
     # Create the WSGI app and wrap with CORS middleware
     app = config.make_wsgi_app()

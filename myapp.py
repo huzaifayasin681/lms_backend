@@ -1,162 +1,87 @@
-from flask import Flask, send_from_directory, request, jsonify
+from flask import Flask, send_from_directory, request
 from flask_cors import CORS
-import os
-import sys
-import logging
 from waitress import serve
 from pyramid.paster import get_app
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from dotenv import load_dotenv
+import os
+import sys
 
-# Load environment variables
 load_dotenv()
 
-# Add the backend directory to Python path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# --- Paths ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BUILD_DIR = os.path.join(BASE_DIR, "build")
+STATIC_DIR = os.path.join(BUILD_DIR, "static")
 
-# Debug: Print environment variables
-print(f"DEBUG myapp.py: CORS_ALLOW_ORIGIN from env: {os.getenv('CORS_ALLOW_ORIGIN', 'NOT_SET')}")
-print(f"DEBUG myapp.py: Current working directory: {os.getcwd()}")
-print(f"DEBUG myapp.py: .env file exists: {os.path.exists('.env')}")
-print(f"DEBUG myapp.py: All CORS-related env vars:")
-for key in os.environ:
-    if 'CORS' in key:
-        print(f"  {key}={os.environ[key]}")
+# Disable Flask's built-in static route so it doesn't steal /static/*
+app = Flask(__name__, static_folder=None)
+CORS(app,
+     origins=os.getenv('CORS_ALLOW_ORIGIN', 'http://localhost:6543').split(','),
+     supports_credentials=True)
 
-# Create Flask app for serving React frontend
-frontend_app = Flask(__name__)
+print(f"Build dir: {BUILD_DIR}  exists={os.path.exists(BUILD_DIR)}")
+print(f"Static dir: {STATIC_DIR} exists={os.path.exists(STATIC_DIR)}")
+if os.path.exists(STATIC_DIR):
+    print("Static subfolders:", os.listdir(STATIC_DIR))
 
-# Enable CORS for all routes - use ONLY environment variable
-cors_origin = os.getenv('CORS_ALLOW_ORIGIN', 'http://jhbnet.ddns.net:46543')
-print(f"DEBUG myapp.py: Flask CORS origin: {cors_origin}")
-CORS(frontend_app, origins=[cors_origin], supports_credentials=True)
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Determine the correct static folder path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
-frontend_build_path = os.path.join(project_root, 'frontend', 'build')
-
-# Fallback paths to try
-possible_paths = [
-    frontend_build_path,
-    '/home/meena/lms-integration/lms_client/lms-frontend/build',
-    os.path.join(current_dir, '..', 'frontend', 'build'),
-    os.path.join(current_dir, 'frontend', 'build')
-]
-
-static_folder = None
-for path in possible_paths:
-    if os.path.exists(path):
-        static_folder = path
-        break
-
-if not static_folder:
-    logger.warning("Frontend build folder not found. Checked paths:")
-    for path in possible_paths:
-        logger.warning(f"  - {path}")
-    static_folder = frontend_build_path  # Use default even if it doesn't exist
-
-logger.info(f"Using static folder: {static_folder}")
-logger.info(f"Static folder exists: {os.path.exists(static_folder)}")
-
-# Update Flask app static folder
-frontend_app.static_folder = static_folder
-
-@frontend_app.before_request
+@app.before_request
 def log_request():
-    logger.info(f"Frontend request: {request.method} {request.path}")
+    print(f"Request: {request.method} {request.path}")
 
-@frontend_app.route('/')
-def serve_react_app():
-    """Serve the main React app"""
+# Serve hashed assets (CRA/Vite) from build/static/*
+@app.route('/static/<path:filename>')
+def static_files(filename):
     try:
-        return send_from_directory(static_folder, 'index.html')
+        return send_from_directory(STATIC_DIR, filename)
     except Exception as e:
-        logger.error(f"Error serving index.html: {e}")
-        return jsonify({
-            "error": "Frontend not found",
-            "message": "React build files not found. Please run 'npm run build' in the frontend directory.",
-            "static_folder": static_folder,
-            "exists": os.path.exists(static_folder)
-        }), 404
+        print(f"Error serving /static/{filename}: {e}")
+        return '', 404
 
-@frontend_app.route('/<path:filename>')
-def serve_static_files(filename):
-    """Serve static files (CSS, JS, images, etc.)"""
+# Index
+@app.route('/')
+def index():
+    return send_from_directory(BUILD_DIR, 'index.html')
+
+# SPA fallback (only when there is no dot in the path)
+@app.route('/<path:path>')
+def catch_all(path):
+    if '.' not in path:
+        return send_from_directory(BUILD_DIR, 'index.html')
+    return '', 404
+
+def create_app():
+    """Mount Pyramid under /api and keep Flask for SPA/static."""
     try:
-        return send_from_directory(static_folder, filename)
+        config_file = os.path.join(BASE_DIR, 'development.ini')
+        if not os.path.exists(config_file):
+            print(f"⚠️ Config file not found: {config_file}")
+            return app
+        
+        pyramid_app = get_app(config_file, 'main')
+        print("✅ Pyramid backend mounted successfully under /api")
+        # Anything under /api is handled by Pyramid
+        return DispatcherMiddleware(app, {'/api': pyramid_app})
     except Exception as e:
-        # If it's not a static file, serve the React app (for client-side routing)
-        if not filename.startswith('static/') and not '.' in filename:
-            return serve_react_app()
-        logger.error(f"Error serving static file {filename}: {e}")
-        return jsonify({"error": "File not found"}), 404
-
-def create_pyramid_app():
-    """Create and configure the Pyramid API app"""
-    try:
-        # Try to find the development.ini file
-        ini_paths = [
-            os.path.join(current_dir, 'development.ini'),
-            os.path.join(current_dir, 'production.ini'),
-        ]
-        
-        ini_file = None
-        for path in ini_paths:
-            if os.path.exists(path):
-                ini_file = path
-                break
-        
-        if not ini_file:
-            logger.error("No configuration file found (development.ini or production.ini)")
-            return None
-            
-        logger.info(f"Loading Pyramid app from: {ini_file}")
-        pyramid_app = get_app(ini_file, 'main')
-        logger.info("Pyramid app loaded successfully")
-        return pyramid_app
-        
-    except Exception as e:
-        logger.error(f"Failed to create Pyramid app: {e}")
-        logger.exception("Full exception details:")
-        return None
-
-def create_combined_app():
-    """Create a combined WSGI app with both Pyramid API and Flask frontend"""
-    pyramid_app = create_pyramid_app()
-    
-    if pyramid_app is None:
-        logger.warning("Pyramid app not available, serving only frontend")
-        return frontend_app
-    
-    # Create dispatcher middleware to route requests
-    # API requests go to Pyramid, everything else goes to Flask
-    combined_app = DispatcherMiddleware(
-        frontend_app,  # Default app (serves React frontend)
-        {
-            '/api': pyramid_app  # API requests go to Pyramid
-        }
-    )
-    
-    logger.info("Combined app created successfully")
-    return combined_app
+        print(f"⚠️ Could not mount Pyramid under /api: {e}")
+        print("Running Flask-only mode (frontend only)")
+        return app
 
 if __name__ == '__main__':
-    logger.info("Starting LMS application...")
-    logger.info(f"Current directory: {current_dir}")
-    logger.info(f"Project root: {project_root}")
-    logger.info(f"Frontend build path: {frontend_build_path}")
+    # Get port from environment or use default
+    port = int(os.getenv('PORT', 6543))
+    host = os.getenv('HOST', '0.0.0.0')
     
-    # Create the combined application
-    app = create_combined_app()
+    print(f"🚀 Starting server on {host}:{port}")
+    print(f"📁 Serving frontend from: {BUILD_DIR}")
+    print(f"🔗 Frontend URL: http://localhost:{port}")
+    print(f"🔗 Backend API URL: http://localhost:{port}/api")
     
-    # Start the server
-    logger.info("Starting server on http://0.0.0.0:6543")
-    logger.info("Frontend will be served at: http://localhost:6543")
-    logger.info("API will be available at: http://localhost:6543/api")
-    
-    serve(app, host='0.0.0.0', port=6543)
+    try:
+        # Serve the composed app (so /api works)
+        serve(create_app(), host=host, port=port, threads=6)
+    except KeyboardInterrupt:
+        print("\n👋 Server stopped")
+    except Exception as e:
+        print(f"❌ Server error: {e}")
+        sys.exit(1)

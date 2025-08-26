@@ -137,11 +137,14 @@ def list_courses(request):
         search = request.params.get('search')
         if search:
             search_lower = search.lower()
-            courses = [
-                course for course in courses
-                if (search_lower in course.get('fullname', '').lower() or
-                    search_lower in course.get('shortname', '').lower())
-            ]
+            # Pre-compute lowercase values for efficiency
+            filtered_courses = []
+            for course in courses:
+                fullname_lower = course.get('fullname', '').lower()
+                shortname_lower = course.get('shortname', '').lower()
+                if search_lower in fullname_lower or search_lower in shortname_lower:
+                    filtered_courses.append(course)
+            courses = filtered_courses
         
         category = request.params.get('category')
         if category:
@@ -188,14 +191,17 @@ def create_course(request):
     # Validate required fields
     required_fields = ['fullname', 'shortname', 'categoryid']
     for field in required_fields:
-        if not data.get(field):
+        if field not in data or data[field] is None or (isinstance(data[field], str) and not data[field].strip()):
             raise HTTPBadRequest(f'{field} is required')
     
     try:
         moodle = get_moodle_service()
         course = moodle.create_course(data)
         
-        log.info(f"Course created in Moodle: {course.get('id')} by user {request.user.username}")
+        # Sanitize log output to prevent log injection
+        course_id = str(course.get('id', 'unknown')).replace('\n', '').replace('\r', '')
+        username = str(request.user.username).replace('\n', '').replace('\r', '')
+        log.info(f"Course created in Moodle: {course_id} by user {username}")
         return normalize_moodle_response(course)
         
     except Exception as e:
@@ -240,7 +246,10 @@ def update_course(request):
         moodle = get_moodle_service()
         moodle.update_course(update_data)
         
-        log.info(f"Course updated in Moodle: {course_id} by user {request.user.username}")
+        # Sanitize log output to prevent log injection
+        safe_course_id = str(course_id).replace('\n', '').replace('\r', '')
+        username = str(request.user.username).replace('\n', '').replace('\r', '')
+        log.info(f"Course updated in Moodle: {safe_course_id} by user {username}")
         return normalize_moodle_response({'message': 'Course updated successfully'})
         
     except Exception as e:
@@ -342,13 +351,21 @@ def enrol_users(request):
         for field in required_fields:
             if field not in enrolment:
                 raise HTTPBadRequest(f'Enrolment {i}: {field} is required')
+            # Validate field values
+            try:
+                value = int(enrolment[field])
+                if value <= 0:
+                    raise HTTPBadRequest(f'Enrolment {i}: {field} must be positive integer')
+            except (ValueError, TypeError):
+                raise HTTPBadRequest(f'Enrolment {i}: {field} must be integer')
     
     try:
         moodle = get_moodle_service()
         moodle.enrol_users(enrolments)
         
-        log.info(f"Users enrolled in Moodle courses by user {request.user.username}: "
-                f"{len(enrolments)} enrolments")
+        # Sanitize log output to prevent log injection
+        username = str(request.user.username).replace('\n', '').replace('\r', '')
+        log.info(f"Users enrolled in Moodle courses by user {username}: {len(enrolments)} enrolments")
         
         return normalize_moodle_response({
             'message': 'Users enrolled successfully',
@@ -389,23 +406,36 @@ def get_users_by_field(request):
         moodle = get_moodle_service()
         users = moodle.get_users_by_field(field, value_list)
         
-        # Filter sensitive user information
-        filtered_users = []
-        for user in users:
-            filtered_users.append({
-                'id': user.get('id'),
-                'username': user.get('username'),
-                'firstname': user.get('firstname'),
-                'lastname': user.get('lastname'),
-                'email': user.get('email'),
-                'profileimagemobile': user.get('profileimagemobile', ''),
-                'profileimageurl': user.get('profileimageurl', '')
-            })
+        # Filter sensitive user information using list comprehension
+        filtered_users = [{
+            'id': user.get('id'),
+            'username': user.get('username'),
+            'firstname': user.get('firstname'),
+            'lastname': user.get('lastname'),
+            'email': user.get('email'),
+            'profileimagemobile': user.get('profileimagemobile', ''),
+            'profileimageurl': user.get('profileimageurl', '')
+        } for user in users]
         
         return normalize_moodle_response(filtered_users)
         
     except Exception as e:
         handle_moodle_error(e)
+
+
+def validate_userid_param(request):
+    """Helper function to validate userid parameter"""
+    userid = request.params.get('userid')
+    if not userid:
+        raise HTTPBadRequest('userid parameter is required')
+    
+    try:
+        userid = int(userid)
+        if userid <= 0:
+            raise HTTPBadRequest('userid must be positive integer')
+        return userid
+    except ValueError:
+        raise HTTPBadRequest('Invalid userid')
 
 
 @view_config(route_name='moodle_notifications', request_method='GET', renderer='json')
@@ -421,14 +451,7 @@ def get_notifications(request):
     - limit: Maximum number of notifications (default 20, max 100)
     - offset: Offset for pagination (default 0)
     """
-    userid = request.params.get('userid')
-    if not userid:
-        raise HTTPBadRequest('userid parameter is required')
-    
-    try:
-        userid = int(userid)
-    except ValueError:
-        raise HTTPBadRequest('Invalid userid')
+    userid = validate_userid_param(request)
     
     try:
         limit = int(request.params.get('limit', 20))
@@ -439,6 +462,8 @@ def get_notifications(request):
     
     try:
         offset = int(request.params.get('offset', 0))
+        if offset < 0:
+            offset = 0
     except ValueError:
         offset = 0
     
@@ -463,14 +488,7 @@ def get_unread_count(request):
     Query parameters:
     - userid: User ID (required)
     """
-    userid = request.params.get('userid')
-    if not userid:
-        raise HTTPBadRequest('userid parameter is required')
-    
-    try:
-        userid = int(userid)
-    except ValueError:
-        raise HTTPBadRequest('Invalid userid')
+    userid = validate_userid_param(request)
     
     try:
         moodle = get_moodle_service()
@@ -504,11 +522,23 @@ def upload_file(request):
     if not hasattr(file_obj, 'filename') or not file_obj.filename:
         raise HTTPBadRequest('Invalid file')
     
-    # Get optional parameters
-    contextid = int(request.POST.get('contextid', 1))
+    # Get optional parameters with validation
+    try:
+        contextid = int(request.POST.get('contextid', 1))
+        if contextid <= 0:
+            raise HTTPBadRequest('contextid must be positive integer')
+    except ValueError:
+        raise HTTPBadRequest('Invalid contextid')
+    
     component = request.POST.get('component', 'user')
     filearea = request.POST.get('filearea', 'draft')
-    itemid = int(request.POST.get('itemid', 0))
+    
+    try:
+        itemid = int(request.POST.get('itemid', 0))
+        if itemid < 0:
+            raise HTTPBadRequest('itemid must be non-negative integer')
+    except ValueError:
+        raise HTTPBadRequest('Invalid itemid')
     
     try:
         # Read file data
@@ -525,7 +555,9 @@ def upload_file(request):
             itemid=itemid
         )
         
-        log.info(f"File uploaded to Moodle: {file_obj.filename} by user {request.user.username}")
+        # Sanitize log output to prevent log injection and avoid logging sensitive filenames
+        username = str(request.user.username).replace('\n', '').replace('\r', '')
+        log.info(f"File uploaded to Moodle by user {username}")
         return normalize_moodle_response(result)
         
     except Exception as e:
@@ -567,7 +599,10 @@ def attach_file_to_course(request):
             intro=data.get('intro', '')
         )
         
-        log.info(f"File attached to course {data['courseid']} in Moodle by user {request.user.username}")
+        # Sanitize log output to prevent log injection
+        course_id = str(data['courseid']).replace('\n', '').replace('\r', '')
+        username = str(request.user.username).replace('\n', '').replace('\r', '')
+        log.info(f"File attached to course {course_id} in Moodle by user {username}")
         return normalize_moodle_response(result)
         
     except Exception as e:

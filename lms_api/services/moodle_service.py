@@ -13,13 +13,14 @@ from urllib.parse import urlencode
 from typing import Dict, Any, List, Optional, Union
 from functools import wraps
 import uuid
+import re
 
 log = logging.getLogger(__name__)
 
 
 class MoodleError(Exception):
     """Base exception for Moodle API errors"""
-    def __init__(self, message: str, error_code: str = None, status_code: int = None):
+    def __init__(self, message: str, error_code: Optional[str] = None, status_code: Optional[int] = None):
         super().__init__(message)
         self.error_code = error_code
         self.status_code = status_code
@@ -51,10 +52,12 @@ def log_moodle_request(func):
         wsfunction = args[0] if args else kwargs.get('wsfunction', 'unknown')
         
         if self.debug_mode:
+            # Safely redact token from URL
+            safe_url = re.sub(r'wstoken=[^&]*', 'wstoken=[REDACTED]', self.base_url)
             log.info(f"[{request_id}] Moodle API request started", extra={
                 'request_id': request_id,
                 'wsfunction': wsfunction,
-                'moodle_base_url': self.base_url.replace(self.token, '[REDACTED]') if self.token in self.base_url else self.base_url
+                'moodle_base_url': safe_url
             })
         
         try:
@@ -110,8 +113,12 @@ class MoodleParamEncoder:
                     new_key = f"{prefix}[{i}]"
                     _encode_recursive(item, new_key)
             else:
-                # Convert to string, handle None values
-                result[prefix] = str(obj) if obj is not None else ''
+                # Handle boolean values for Moodle API
+                if isinstance(obj, bool):
+                    result[prefix] = '1' if obj else '0'
+                else:
+                    # Convert to string, handle None values
+                    result[prefix] = str(obj) if obj is not None else ''
         
         _encode_recursive(data)
         return result
@@ -152,7 +159,10 @@ class MoodleService:
         """
         self.base_url = base_url or os.getenv('MOODLE_BASE_URL')
         self.token = token or os.getenv('MOODLE_TOKEN')
-        self.timeout = timeout or int(os.getenv('MOODLE_TIMEOUT_MS', '15000'))
+        try:
+            self.timeout = timeout or int(os.getenv('MOODLE_TIMEOUT_MS', '15000'))
+        except ValueError:
+            self.timeout = 15000
         self.debug_mode = os.getenv('MOODLE_DEBUG', 'false').lower() == 'true'
         
         if not self.base_url:
@@ -184,8 +194,9 @@ class MoodleService:
             MoodleAuthError: If authentication fails
             MoodleError: For other errors
         """
-        # Construct token endpoint URL
-        token_url = self.base_url.replace('/webservice/rest/server.php', '/login/token.php')
+        # Construct token endpoint URL using relative path
+        base_path = self.base_url.replace('/webservice/rest/server.php', '')
+        token_url = f"{base_path}/login/token.php"
         
         params = {
             'username': username,
@@ -230,18 +241,18 @@ class MoodleService:
         message = response_data.get('message', 'Unknown Moodle error')
         
         # Map Moodle error codes to HTTP status codes and error types
-        auth_errors = ['invalidtoken', 'accessexception', 'nopermissions', 'notloggedin']
-        validation_errors = ['invalidparameter', 'missingparam', 'invalidrecord']
-        not_found_errors = ['invaliduser', 'invalidcourse', 'coursenotexist']
+        AUTH_ERRORS = ['invalidtoken', 'accessexception', 'nopermissions', 'notloggedin']
+        VALIDATION_ERRORS = ['invalidparameter', 'missingparam', 'invalidrecord']
+        NOT_FOUND_ERRORS = ['invaliduser', 'invalidcourse', 'coursenotexist']
         
-        if error_code in auth_errors:
+        if error_code in AUTH_ERRORS:
             if error_code == 'invalidtoken':
                 return MoodleAuthError("Invalid Moodle token", error_code, 401)
             else:
                 return MoodleAuthError(f"Access denied: {message}", error_code, 403)
-        elif error_code in validation_errors:
+        elif error_code in VALIDATION_ERRORS:
             return MoodleValidationError(f"Validation error: {message}", error_code, 400)
-        elif error_code in not_found_errors:
+        elif error_code in NOT_FOUND_ERRORS:
             return MoodleNotFoundError(f"Resource not found: {message}", error_code, 404)
         else:
             return MoodleError(f"Moodle error: {message}", error_code, 500)
@@ -263,7 +274,7 @@ class MoodleService:
             MoodleError: For various error conditions
         """
         # Determine if operation is idempotent (safe to retry)
-        idempotent_functions = [
+        IDEMPOTENT_FUNCTIONS = [
             'core_webservice_get_site_info',
             'core_course_get_courses',
             'core_user_get_users_by_field',
@@ -272,7 +283,7 @@ class MoodleService:
             'core_message_get_unread_popup_notifications_count'
         ]
         
-        is_idempotent = wsfunction in idempotent_functions
+        is_idempotent = wsfunction in IDEMPOTENT_FUNCTIONS
         retries = max_retries if is_idempotent else 0
         
         # Prepare request data
@@ -426,7 +437,8 @@ class MoodleService:
             raise MoodleValidationError("Course ID is required for update")
         
         params = {'courses': [course_update]}
-        return self.call('core_course_update_courses', params)
+        result = self.call('core_course_update_courses', params)
+        return result
     
     def get_users_by_field(self, field: str, values: List[str]) -> List[Dict[str, Any]]:
         """
@@ -465,12 +477,19 @@ class MoodleService:
         if not enrolments:
             return
         
-        # Validate required fields
-        for enrolment in enrolments:
+        # Validate required fields and values
+        for i, enrolment in enumerate(enrolments):
             required_fields = ['roleid', 'userid', 'courseid']
             for field in required_fields:
                 if field not in enrolment:
-                    raise MoodleValidationError(f"Required field missing in enrolment: {field}")
+                    raise MoodleValidationError(f"Required field missing in enrolment {i}: {field}")
+                # Validate that IDs are positive integers
+                try:
+                    value = int(enrolment[field])
+                    if value <= 0:
+                        raise MoodleValidationError(f"Invalid {field} in enrolment {i}: must be positive integer")
+                except (ValueError, TypeError):
+                    raise MoodleValidationError(f"Invalid {field} in enrolment {i}: must be integer")
         
         params = {'enrolments': enrolments}
         return self.call('enrol_manual_enrol_users', params)
@@ -498,7 +517,7 @@ class MoodleService:
         try:
             return self.call('message_popup_get_popup_notifications', params)
         except MoodleError as e:
-            if 'function not found' in str(e).lower():
+            if e.error_code == 'invalidfunction' or 'function not found' in str(e).lower():
                 # Fall back to core_message functions
                 params = {
                     'userid': userid,
@@ -523,11 +542,12 @@ class MoodleService:
                              {'useridto': userid})
             return result if isinstance(result, int) else 0
         except MoodleError as e:
-            if 'function not found' in str(e).lower():
+            if e.error_code == 'invalidfunction' or 'function not found' in str(e).lower():
                 # Fall back to getting all notifications and counting
                 notifications = self.get_popup_notifications(userid, limit=100)
                 if isinstance(notifications, dict) and 'notifications' in notifications:
                     return len([n for n in notifications['notifications'] if not n.get('read', True)])
+                return 0
             raise
     
     # File handling methods
@@ -551,7 +571,8 @@ class MoodleService:
         """
         # This requires a different endpoint and multipart/form-data
         # Implementation depends on available Moodle file upload endpoints
-        upload_url = self.base_url.replace('/webservice/rest/server.php', '/webservice/upload.php')
+        base_path = self.base_url.replace('/webservice/rest/server.php', '')
+        upload_url = f"{base_path}/webservice/upload.php"
         
         files = {
             'file': (filename, file_data, 'application/octet-stream')
@@ -574,8 +595,10 @@ class MoodleService:
             )
             response.raise_for_status()
             return response.json()
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             raise MoodleError(f"File upload failed: {str(e)}")
+        except ValueError as e:
+            raise MoodleError(f"Invalid response from file upload: {str(e)}")
     
     def attach_file_to_course_resource(self, courseid: int, draftitemid: int, 
                                      name: str, intro: str = '') -> Dict[str, Any]:
@@ -592,7 +615,7 @@ class MoodleService:
             Created resource data
         """
         params = {
-            'assignments': [{
+            'resources': [{
                 'courseid': courseid,
                 'name': name,
                 'intro': intro,
