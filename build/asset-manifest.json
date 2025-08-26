@@ -1,11 +1,11 @@
 {
   "files": {
-    "main.css": "/static/css/main.428a14e6.css",
-    "main.js": "/static/js/main.caf33d61.js",
-    "index.html": "/index.html"
+    "main.css": "http://jhbnet.ddns.net:46543/static/css/main.cf8135b0.css",
+    "main.js": "http://jhbnet.ddns.net:46543/static/js/main.7cd20720.js",
+    "index.html": "http://jhbnet.ddns.net:46543/index.html"
   },
   "entrypoints": [
-    "static/css/main.428a14e6.css",
-    "static/js/main.caf33d61.js"
+    "static/css/main.cf8135b0.css",
+    "static/js/main.7cd20720.js"
   ]
 }

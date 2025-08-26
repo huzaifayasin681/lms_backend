@@ -207,10 +207,11 @@ class MoodleService:
         try:
             response = requests.post(
                 token_url,
-                params=params,
+                data=params,  # Use data instead of params for POST
                 timeout=self.timeout_seconds,
                 headers={
-                    'User-Agent': 'LMS-Backend/1.0'
+                    'User-Agent': 'LMS-Backend/1.0',
+                    'Content-Type': 'application/x-www-form-urlencoded'
                 }
             )
             response.raise_for_status()
