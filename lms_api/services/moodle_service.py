@@ -278,6 +278,9 @@ class MoodleService:
         IDEMPOTENT_FUNCTIONS = [
             'core_webservice_get_site_info',
             'core_course_get_courses',
+            'core_course_get_contents',
+            'core_course_get_categories',
+            'core_user_get_users',
             'core_user_get_users_by_field',
             'message_popup_get_popup_notifications',
             'core_message_get_popup_notifications',
