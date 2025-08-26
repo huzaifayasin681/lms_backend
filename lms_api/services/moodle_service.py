@@ -626,3 +626,251 @@ class MoodleService:
         }
         
         return self.call('mod_resource_add_resource', params)
+    
+    def delete_course(self, course_id: int) -> Dict[str, Any]:
+        """
+        Delete a course from Moodle
+        
+        Args:
+            course_id: Course ID to delete
+            
+        Returns:
+            Deletion result
+        """
+        params = {
+            'courseids': [course_id]
+        }
+        
+        return self.call('core_course_delete_courses', params)
+    
+    def get_course_contents(self, courseid: int) -> List[Dict[str, Any]]:
+        """
+        Get course contents/modules
+        
+        Args:
+            courseid: Course ID
+            
+        Returns:
+            List of course sections and modules
+        """
+        params = {
+            'courseid': courseid
+        }
+        
+        result = self.call('core_course_get_contents', params)
+        return result if isinstance(result, list) else []
+    
+    def delete_course_module(self, cmid: int) -> Dict[str, Any]:
+        """
+        Delete a course module (content)
+        
+        Args:
+            cmid: Course module ID
+            
+        Returns:
+            Deletion result
+        """
+        params = {
+            'cmid': cmid
+        }
+        
+        return self.call('core_course_delete_module', params)
+    
+    def create_course_section(self, courseid: int, section_name: str) -> Dict[str, Any]:
+        """
+        Create a new section in a course
+        
+        Args:
+            courseid: Course ID
+            section_name: Name of the section
+            
+        Returns:
+            Created section data
+        """
+        params = {
+            'courseid': courseid,
+            'section': {
+                'name': section_name,
+                'summary': '',
+                'summaryformat': 1
+            }
+        }
+        
+        return self.call('core_course_create_section', params)
+    
+    def add_url_to_course(self, courseid: int, section: int, name: str, 
+                         externalurl: str, intro: str = '') -> Dict[str, Any]:
+        """
+        Add a URL resource to a course
+        
+        Args:
+            courseid: Course ID
+            section: Section number (0-based)
+            name: URL resource name
+            externalurl: The URL
+            intro: Description
+            
+        Returns:
+            Created URL resource data
+        """
+        params = {
+            'urls': [{
+                'courseid': courseid,
+                'name': name,
+                'intro': intro,
+                'introformat': 1,
+                'externalurl': externalurl,
+                'section': section
+            }]
+        }
+        
+        return self.call('mod_url_add_url', params)
+    
+    def add_page_to_course(self, courseid: int, section: int, name: str, 
+                          content: str, intro: str = '') -> Dict[str, Any]:
+        """
+        Add a page resource to a course
+        
+        Args:
+            courseid: Course ID
+            section: Section number (0-based)
+            name: Page name
+            content: Page content (HTML)
+            intro: Description
+            
+        Returns:
+            Created page resource data
+        """
+        params = {
+            'pages': [{
+                'courseid': courseid,
+                'name': name,
+                'intro': intro,
+                'introformat': 1,
+                'content': content,
+                'contentformat': 1,
+                'section': section
+            }]
+        }
+        
+        return self.call('mod_page_add_page', params)
+    
+    def get_course_categories(self) -> List[Dict[str, Any]]:
+        """
+        Get all course categories
+        
+        Returns:
+            List of category objects
+        """
+        result = self.call('core_course_get_categories')
+        return result if isinstance(result, list) else []
+    
+    def search_courses(self, search_term: str, page: int = 0, perpage: int = 20) -> Dict[str, Any]:
+        """
+        Search courses by name or description
+        
+        Args:
+            search_term: Search term
+            page: Page number (0-based)
+            perpage: Results per page
+            
+        Returns:
+            Search results with courses and pagination info
+        """
+        params = {
+            'criterianame': 'search',
+            'criteriavalue': search_term,
+            'page': page,
+            'perpage': perpage
+        }
+        
+        return self.call('core_course_search_courses', params)
+    
+    def get_enrolled_courses(self, userid: int) -> List[Dict[str, Any]]:
+        """
+        Get courses a user is enrolled in
+        
+        Args:
+            userid: User ID
+            
+        Returns:
+            List of enrolled courses
+        """
+        params = {
+            'userid': userid
+        }
+        
+        result = self.call('core_enrol_get_users_courses', params)
+        return result if isinstance(result, list) else []
+    
+    def validate_file_upload(self, file_size: int, filename: str) -> Dict[str, Any]:
+        """
+        Validate file for upload (client-side validation)
+        
+        Args:
+            file_size: File size in bytes
+            filename: Original filename
+            
+        Returns:
+            Validation result
+        """
+        MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+        
+        if file_size > MAX_FILE_SIZE:
+            return {
+                'valid': False,
+                'error': f'File size ({file_size / 1024 / 1024:.1f}MB) exceeds maximum allowed size (100MB)'
+            }
+        
+        # Check file extension
+        allowed_extensions = {
+            '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp',
+            '.txt', '.md', '.html', '.css', '.js', '.json', '.xml',
+            '.py', '.java', '.c', '.cpp', '.h', '.cs', '.php',
+            '.zip', '.rar', '.7z', '.tar', '.gz',
+            '.mp3', '.wav', '.mp4', '.avi', '.mov', '.webm'
+        }
+        
+        file_ext = '.' + filename.split('.')[-1].lower() if '.' in filename else ''
+        if file_ext not in allowed_extensions:
+            return {
+                'valid': False,
+                'error': f'File type {file_ext} is not allowed'
+            }
+        
+        return {'valid': True}
+    
+    def get_error_notifications(self, userid: int) -> List[Dict[str, Any]]:
+        """
+        Get error notifications for instructor dashboard
+        
+        Args:
+            userid: User ID
+            
+        Returns:
+            List of error notifications
+        """
+        try:
+            # Get recent notifications that might contain errors
+            notifications = self.get_popup_notifications(userid, limit=50)
+            
+            error_notifications = []
+            if isinstance(notifications, dict) and 'notifications' in notifications:
+                for notif in notifications['notifications']:
+                    # Filter for error-related notifications
+                    if any(keyword in notif.get('subject', '').lower() for keyword in 
+                          ['error', 'failed', 'problem', 'issue', 'warning']):
+                        error_notifications.append({
+                            'id': notif.get('id'),
+                            'subject': notif.get('subject', ''),
+                            'text': notif.get('text', ''),
+                            'timecreated': notif.get('timecreated'),
+                            'read': notif.get('read', False)
+                        })
+            
+            return error_notifications
+            
+        except Exception as e:
+            log.warning(f"Failed to get error notifications: {str(e)}")
+            return []

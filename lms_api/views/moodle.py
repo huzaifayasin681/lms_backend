@@ -656,3 +656,135 @@ def create_user(request):
         return normalize_moodle_response(result)
     except Exception as e:
         handle_moodle_error(e)
+
+
+@view_config(route_name='moodle_course_delete', request_method='DELETE', renderer='json')
+def delete_moodle_course(request):
+    """
+    DELETE /api/moodle/courses/{course_id}
+    
+    Delete a course from Moodle
+    """
+    course_id = request.matchdict['course_id']
+    
+    try:
+        course_id_int = int(course_id)
+    except ValueError:
+        raise HTTPBadRequest('Invalid course ID')
+    
+    try:
+        moodle = get_moodle_service()
+        result = moodle.delete_course(course_id_int)
+        
+        log.info(f"Course deleted from Moodle: {course_id}")
+        return normalize_moodle_response({'message': 'Course deleted successfully'})
+        
+    except Exception as e:
+        handle_moodle_error(e)
+
+
+@view_config(route_name='moodle_search_courses', request_method='GET', renderer='json')
+def search_moodle_courses(request):
+    """
+    GET /api/moodle/courses/search?q=term&page=0&limit=20
+    
+    Search courses in Moodle
+    """
+    search_term = request.params.get('q', '').strip()
+    if not search_term:
+        raise HTTPBadRequest('Search term is required')
+    
+    try:
+        page = int(request.params.get('page', 0))
+        limit = min(int(request.params.get('limit', 20)), 100)
+    except ValueError:
+        page, limit = 0, 20
+    
+    try:
+        moodle = get_moodle_service()
+        results = moodle.search_courses(search_term, page, limit)
+        
+        return normalize_moodle_response(results)
+        
+    except Exception as e:
+        handle_moodle_error(e)
+
+
+@view_config(route_name='moodle_validate_file', request_method='POST', renderer='json')
+def validate_moodle_file(request):
+    """
+    POST /api/moodle/validate-file
+    
+    Validate file for Moodle upload
+    
+    Body:
+    {
+        "filename": "document.pdf",
+        "filesize": 1048576
+    }
+    """
+    try:
+        data = request.json_body
+    except ValueError:
+        raise HTTPBadRequest('Invalid JSON')
+    
+    filename = data.get('filename', '')
+    filesize = data.get('filesize', 0)
+    
+    if not filename:
+        raise HTTPBadRequest('Filename is required')
+    
+    try:
+        filesize = int(filesize)
+    except (ValueError, TypeError):
+        raise HTTPBadRequest('Invalid file size')
+    
+    try:
+        moodle = get_moodle_service()
+        validation_result = moodle.validate_file_upload(filesize, filename)
+        
+        return normalize_moodle_response(validation_result)
+        
+    except Exception as e:
+        handle_moodle_error(e)
+
+
+@view_config(route_name='moodle_instructor_dashboard', request_method='GET', renderer='json')
+def get_moodle_instructor_dashboard(request):
+    """
+    GET /api/moodle/instructor/dashboard?userid=123
+    
+    Get instructor dashboard data including error notifications
+    """
+    userid = request.params.get('userid')
+    if not userid:
+        raise HTTPBadRequest('userid parameter is required')
+    
+    try:
+        userid = int(userid)
+    except ValueError:
+        raise HTTPBadRequest('Invalid userid')
+    
+    try:
+        moodle = get_moodle_service()
+        
+        # Get instructor's courses
+        enrolled_courses = moodle.get_enrolled_courses(userid)
+        
+        # Get error notifications
+        error_notifications = moodle.get_error_notifications(userid)
+        
+        # Get recent notifications count
+        unread_count = moodle.get_unread_popup_count(userid)
+        
+        dashboard_data = {
+            'courses': enrolled_courses,
+            'error_notifications': error_notifications,
+            'unread_notifications_count': unread_count,
+            'total_courses': len(enrolled_courses)
+        }
+        
+        return normalize_moodle_response(dashboard_data)
+        
+    except Exception as e:
+        handle_moodle_error(e)
